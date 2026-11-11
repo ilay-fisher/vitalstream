@@ -1,0 +1,125 @@
+suite: network policy and ingress
+templates:
+  - networkpolicy.yaml
+  - ingress.yaml
+tests:
+  - it: default deny covers ingress and egress for every app pod
+    template: networkpolicy.yaml
+    documentSelector:
+      path: metadata.name
+      value: default-deny
+    asserts:
+      - equal:
+          path: spec.policyTypes
+          value: [Ingress, Egress]
+      - equal:
+          path: spec.podSelector.matchLabels["app.kubernetes.io/part-of"]
+          value: vitalstream
+  - it: DNS egress is allowed
+    template: networkpolicy.yaml
+    documentSelector:
+      path: metadata.name
+      value: allow-dns
+    asserts:
+      - contains:
+          path: spec.egress[0].ports
+          content:
+            port: 53
+            protocol: UDP
+  - it: clinical-api accepts traffic only from dashboard, copilot and the ingress controller
+    template: networkpolicy.yaml
+    documentSelector:
+      path: metadata.name
+      value: clinical-api
+    asserts:
+      - equal:
+          path: spec.ingress[0].from[0].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: dashboard
+      - equal:
+          path: spec.ingress[0].from[1].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: copilot
+      - equal:
+          path: spec.ingress[0].ports[0].port
+          value: 8082
+  - it: copilot may reach the internet on 443 for the LLM
+    template: networkpolicy.yaml
+    documentSelector:
+      path: metadata.name
+      value: copilot
+    asserts:
+      - contains:
+          path: spec.egress
+          content:
+            to:
+              - ipBlock:
+                  cidr: 0.0.0.0/0
+            ports:
+              - port: 443
+                protocol: TCP
+  - it: infra egress is limited to the infra namespace on listed ports
+    template: networkpolicy.yaml
+    documentSelector:
+      path: metadata.name
+      value: ingest-gateway
+    asserts:
+      - contains:
+          path: spec.egress[0].ports
+          content:
+            port: 6379
+            protocol: TCP
+      - equal:
+          path: spec.egress[0].to[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+          value: vitalstream-infra
+  - it: network policies can be switched off
+    template: networkpolicy.yaml
+    set:
+      networkPolicy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: ingress is disabled by default
+    template: ingress.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: ingress routes paths to the right services and ports
+    template: ingress.yaml
+    set:
+      ingress.enabled: true
+      ingress.className: nginx
+    asserts:
+      - isKind:
+          of: Ingress
+      - equal:
+          path: spec.ingressClassName
+          value: nginx
+      - contains:
+          path: spec.rules[0].http.paths
+          content:
+            path: /api/v1/vitals
+            pathType: Prefix
+            backend:
+              service:
+                name: ingest-gateway
+                port:
+                  number: 8081
+      - contains:
+          path: spec.rules[0].http.paths
+          content:
+            path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dashboard
+                port:
+                  number: 3000
+  - it: ingress fails when a path points at an unknown service
+    template: ingress.yaml
+    set:
+      ingress.enabled: true
+      ingress.hosts[0].host: x.example.org
+      ingress.hosts[0].paths[0].path: /
+      ingress.hosts[0].paths[0].service: nope
+    asserts:
+      - failedTemplate:
+          errorPattern: nope

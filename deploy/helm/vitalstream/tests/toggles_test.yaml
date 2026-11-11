@@ -1,0 +1,59 @@
+suite: service toggles
+templates:
+  - deployment.yaml
+  - service.yaml
+tests:
+  - it: five deployments by default
+    template: deployment.yaml
+    asserts:
+      - hasDocuments:
+          count: 5
+  - it: five services by default
+    template: service.yaml
+    asserts:
+      - hasDocuments:
+          count: 5
+  - it: disabled services render nothing
+    template: deployment.yaml
+    set:
+      services.stream-processor.enabled: false
+      services.clinical-api.enabled: false
+      services.dashboard.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 2
+  - it: service exposes the contract port by name
+    template: service.yaml
+    documentSelector:
+      path: metadata.name
+      value: ingest-gateway
+    asserts:
+      - equal:
+          path: spec.ports[0].port
+          value: 8081
+      - equal:
+          path: spec.ports[0].targetPort
+          value: http
+      - equal:
+          path: spec.type
+          value: ClusterIP
+  - it: dashboard port follows the contract
+    template: service.yaml
+    documentSelector:
+      path: metadata.name
+      value: dashboard
+    asserts:
+      - equal:
+          path: spec.ports[0].port
+          value: 3000
+  - it: image tag defaults to the chart appVersion and registry is prefixed
+    template: deployment.yaml
+    set:
+      global.imageRegistry: 123.dkr.ecr.eu-west-1.amazonaws.com
+    documentSelector:
+      path: metadata.name
+      value: copilot
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: 123.dkr.ecr.eu-west-1.amazonaws.com/vitalstream/copilot:0.1.0

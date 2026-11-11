@@ -1,0 +1,74 @@
+suite: probes
+templates:
+  - deployment.yaml
+tests:
+  - it: java services use spring actuator liveness and readiness groups
+    documentSelector:
+      path: metadata.name
+      value: ingest-gateway
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /actuator/health/liveness
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /actuator/health/readiness
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.httpGet.path
+          value: /actuator/health/liveness
+  - it: clinical-api uses the same actuator paths
+    documentSelector:
+      path: metadata.name
+      value: clinical-api
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /actuator/health/liveness
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /actuator/health/readiness
+  - it: python services use /health
+    documentSelector:
+      path: metadata.name
+      value: copilot
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /health
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /health
+  - it: stream-processor uses /health
+    documentSelector:
+      path: metadata.name
+      value: stream-processor
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /health
+  - it: probes send an allowlisted Host header so the Host allowlist does not reject kubelet
+    documentSelector:
+      path: metadata.name
+      value: ingest-gateway
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.httpHeaders
+          content:
+            name: Host
+            value: localhost
+      - contains:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.httpHeaders
+          content:
+            name: Host
+            value: localhost
+  - it: probes target the named container port
+    documentSelector:
+      path: metadata.name
+      value: copilot
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.port
+          value: http
+      - equal:
+          path: spec.template.spec.containers[0].ports[0].containerPort
+          value: 8083
