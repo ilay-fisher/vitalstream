@@ -1,0 +1,149 @@
+suite: environment and hosts
+templates:
+  - configmap.yaml
+tests:
+  - it: APP_ENV is prod so the secret startup guard is active
+    documentSelector:
+      path: metadata.name
+      value: ingest-gateway
+    asserts:
+      - equal:
+          path: data.APP_ENV
+          value: prod
+  - it: APP_ENV is prod for every guarded service
+    documentSelector:
+      path: metadata.name
+      value: copilot
+    asserts:
+      - equal:
+          path: data.APP_ENV
+          value: prod
+  - it: java ALLOWED_HOSTS has service DNS names with port variants and the probe host
+    documentSelector:
+      path: metadata.name
+      value: ingest-gateway
+    release:
+      namespace: vs
+    asserts:
+      - matchRegex:
+          path: data.ALLOWED_HOSTS
+          pattern: (^|,)ingest-gateway(,|$)
+      - matchRegex:
+          path: data.ALLOWED_HOSTS
+          pattern: (^|,)ingest-gateway:8081(,|$)
+      - matchRegex:
+          path: data.ALLOWED_HOSTS
+          pattern: (^|,)ingest-gateway\.vs\.svc(,|$)
+      - matchRegex:
+          path: data.ALLOWED_HOSTS
+          pattern: (^|,)ingest-gateway\.vs\.svc\.cluster\.local:8081(,|$)
+      - matchRegex:
+          path: data.ALLOWED_HOSTS
+          pattern: (^|,)localhost(,|$)
+  - it: python ALLOWED_HOSTS lists host names only because Starlette ignores ports
+    documentSelector:
+      path: metadata.name
+      value: copilot
+    release:
+      namespace: vs
+    asserts:
+      - equal:
+          path: data.ALLOWED_HOSTS
+          value: localhost,127.0.0.1,copilot,copilot.vs,copilot.vs.svc,copilot.vs.svc.cluster.local
+  - it: extra allowed hosts and ingress hosts are appended
+    set:
+      global.extraAllowedHosts: [api.example.org]
+      ingress.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: copilot
+    asserts:
+      - matchRegex:
+          path: data.ALLOWED_HOSTS
+          pattern: (^|,)api\.example\.org(,|$)
+      - matchRegex:
+          path: data.ALLOWED_HOSTS
+          pattern: (^|,)vitalstream\.example\.org(,|$)
+  - it: infra endpoints are rendered from the infra values
+    documentSelector:
+      path: metadata.name
+      value: clinical-api
+    set:
+      infra.kafkaBootstrapServers: b-1.msk:9094
+    asserts:
+      - equal:
+          path: data.KAFKA_BOOTSTRAP_SERVERS
+          value: b-1.msk:9094
+      - equal:
+          path: data.POSTGRES_URL
+          value: jdbc:postgresql://postgres:5432/vitalstream
+      - equal:
+          path: data.SERVER_PORT
+          value: "8082"
+  - it: empty optional endpoints are omitted rather than rendered blank
+    documentSelector:
+      path: metadata.name
+      value: clinical-api
+    asserts:
+      - notExists:
+          path: data.AWS_ENDPOINT_URL
+  - it: AWS endpoint override is passed through for LocalStack
+    documentSelector:
+      path: metadata.name
+      value: clinical-api
+    set:
+      infra.awsEndpointUrl: http://localstack:4566
+    asserts:
+      - equal:
+          path: data.AWS_ENDPOINT_URL
+          value: http://localstack:4566
+  - it: dashboard gets no secret-guard variables
+    documentSelector:
+      path: metadata.name
+      value: dashboard
+    asserts:
+      - notExists:
+          path: data.APP_ENV
+      - notExists:
+          path: data.ALLOWED_HOSTS
+  - it: name prefix is applied to resource names and host names
+    set:
+      global.namePrefix: vs-
+    documentSelector:
+      path: metadata.name
+      value: vs-copilot
+    asserts:
+      - matchRegex:
+          path: data.ALLOWED_HOSTS
+          pattern: (^|,)vs-copilot(,|$)
+  - it: stream-processor gets METRICS_PORT and the archive URI from the bucket name
+    documentSelector:
+      path: metadata.name
+      value: stream-processor
+    set:
+      infra.archiveBucket: vitalstream-archive-123456789012-eu-west-1
+    asserts:
+      - equal:
+          path: data.METRICS_PORT
+          value: "9404"
+      - equal:
+          path: data.ARCHIVE_URI
+          value: s3a://vitalstream-archive-123456789012-eu-west-1/vitals_raw
+      - equal:
+          path: data.AWS_REGION
+          value: us-east-1
+  - it: clinical-api gets the SQS queue name, not a URL
+    documentSelector:
+      path: metadata.name
+      value: clinical-api
+    asserts:
+      - equal:
+          path: data.VITALSTREAM_SQS_QUEUENAME
+          value: alert-escalations
+  - it: broker url with credentials is never in a ConfigMap
+    documentSelector:
+      path: metadata.name
+      value: clinical-api
+    asserts:
+      - notExists:
+          path: data.RABBITMQ_URL

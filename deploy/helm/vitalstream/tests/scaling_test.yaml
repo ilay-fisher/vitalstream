@@ -1,0 +1,81 @@
+suite: autoscaling and disruption budgets
+templates:
+  - hpa.yaml
+  - pdb.yaml
+  - deployment.yaml
+tests:
+  - it: ingest-gateway gets a CPU based autoscaling/v2 HPA
+    template: hpa.yaml
+    documentSelector:
+      path: metadata.name
+      value: ingest-gateway
+    asserts:
+      - isKind:
+          of: HorizontalPodAutoscaler
+      - equal:
+          path: apiVersion
+          value: autoscaling/v2
+      - equal:
+          path: spec.scaleTargetRef.name
+          value: ingest-gateway
+      - equal:
+          path: spec.metrics[0].resource.name
+          value: cpu
+      - equal:
+          path: spec.metrics[0].resource.target.type
+          value: Utilization
+  - it: clinical-api gets an HPA too
+    template: hpa.yaml
+    documentSelector:
+      path: metadata.name
+      value: clinical-api
+    asserts:
+      - equal:
+          path: spec.scaleTargetRef.kind
+          value: Deployment
+  - it: only the two stateless HTTP services autoscale
+    template: hpa.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+  - it: autoscaled deployments do not pin replicas
+    template: deployment.yaml
+    documentSelector:
+      path: metadata.name
+      value: ingest-gateway
+    asserts:
+      - notExists:
+          path: spec.replicas
+  - it: non autoscaled deployments pin replicas
+    template: deployment.yaml
+    documentSelector:
+      path: metadata.name
+      value: copilot
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 1
+  - it: disabling autoscaling removes the HPA
+    template: hpa.yaml
+    set:
+      services.ingest-gateway.autoscaling.enabled: false
+      services.clinical-api.autoscaling.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: every enabled service has a PodDisruptionBudget that never blocks drains of a single replica
+    template: pdb.yaml
+    documentSelector:
+      path: metadata.name
+      value: copilot
+    asserts:
+      - isKind:
+          of: PodDisruptionBudget
+      - equal:
+          path: spec.maxUnavailable
+          value: 1
+  - it: five PDBs by default
+    template: pdb.yaml
+    asserts:
+      - hasDocuments:
+          count: 5

@@ -1,0 +1,76 @@
+suite: security context and resources
+templates:
+  - deployment.yaml
+tests:
+  - it: every pod runs as non-root with a numeric uid and the runtime seccomp profile
+    documentSelector:
+      path: metadata.name
+      value: ingest-gateway
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 10001
+      - equal:
+          path: spec.template.spec.securityContext.seccompProfile.type
+          value: RuntimeDefault
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+  - it: containers drop all capabilities and have a read-only root filesystem
+    documentSelector:
+      path: metadata.name
+      value: copilot
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          value: [ALL]
+  - it: read-only root filesystem is backed by an emptyDir /tmp
+    documentSelector:
+      path: metadata.name
+      value: clinical-api
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: tmp-0
+            mountPath: /tmp
+      - equal:
+          path: spec.template.spec.volumes[0].emptyDir
+          value: {}
+  - it: dashboard gets writable nginx paths
+    documentSelector:
+      path: metadata.name
+      value: dashboard
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: tmp-1
+            mountPath: /var/cache/nginx
+  - it: resources have both requests and limits
+    documentSelector:
+      path: metadata.name
+      value: stream-processor
+    asserts:
+      - isNotEmpty:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+      - isNotEmpty:
+          path: spec.template.spec.containers[0].resources.requests.memory
+      - isNotEmpty:
+          path: spec.template.spec.containers[0].resources.limits.memory
+  - it: pod template carries a config checksum so config changes roll pods
+    documentSelector:
+      path: metadata.name
+      value: copilot
+    asserts:
+      - isNotEmpty:
+          path: spec.template.metadata.annotations["checksum/config"]

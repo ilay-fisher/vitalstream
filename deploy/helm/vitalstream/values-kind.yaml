@@ -1,0 +1,48 @@
+# Overrides for the local kind cluster (deploy/kind/up.sh). Images are built locally and loaded with
+# `kind load docker-image`, so they are never pulled. Secrets come from the Secret created by up.sh.
+global:
+  imagePullPolicy: Never
+  # `kubectl port-forward` makes the Host header localhost:<local port>. Spring matches it literally.
+  extraAllowedHosts: ["localhost:26081", "localhost:26083"]
+
+secrets:
+  existingSecret: vitalstream-secrets
+
+# Infra lives in the vitalstream-infra namespace (deploy/kind/infra.yaml).
+infra:
+  kafkaBootstrapServers: kafka.vitalstream-infra.svc.cluster.local:9092
+  redisUrl: redis://redis.vitalstream-infra.svc.cluster.local:6379
+  postgres:
+    host: postgres.vitalstream-infra.svc.cluster.local
+  elasticsearchUrl: http://elasticsearch.vitalstream-infra.svc.cluster.local:9200
+  cassandraContactPoints: cassandra.vitalstream-infra.svc.cluster.local:9042
+  rabbitmq:
+    host: rabbitmq.vitalstream-infra.svc.cluster.local
+
+services:
+  ingest-gateway:
+    image: {tag: local}
+    replicaCount: 1
+    # kind has no metrics-server, an HPA would sit at <unknown>.
+    autoscaling: {enabled: false}
+    resources:
+      requests: {cpu: 50m, memory: 256Mi}
+      limits: {cpu: "1", memory: 640Mi}
+  copilot:
+    image: {tag: local}
+    resources:
+      requests: {cpu: 100m, memory: 384Mi}
+      limits: {cpu: "1", memory: 1536Mi}
+  # Images for these do not exist on main yet, or need infra the kind setup does not provide
+  # (Cassandra, RabbitMQ, LocalStack). Flip to true once the image is built and loaded.
+  stream-processor:
+    enabled: false
+  clinical-api:
+    enabled: false
+    autoscaling: {enabled: false}
+  dashboard:
+    enabled: false
+
+# Pod (10.244.0.0/16) and Service (10.96.0.0/16) CIDRs of the kind default cluster.
+networkPolicy:
+  clusterCIDRs: [10.244.0.0/16, 10.96.0.0/16]

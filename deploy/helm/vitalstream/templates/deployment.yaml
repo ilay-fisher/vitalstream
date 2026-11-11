@@ -1,0 +1,128 @@
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+{{- $ctx := dict "root" $ "name" $name "svc" $svc }}
+{{- $fn := include "vs.name" $ctx }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fn }}
+  labels:
+    {{- include "vs.labels" $ctx | nindent 4 }}
+spec:
+  {{- if not $svc.autoscaling.enabled }}
+  replicas: {{ $svc.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "vs.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vs.labels" $ctx | nindent 8 }}
+      annotations:
+        checksum/config: {{ include "vs.config" $ctx | sha256sum }}
+        {{- if $svc.metricsPath }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ $svc.port | quote }}
+        prometheus.io/path: {{ $svc.metricsPath }}
+        {{- end }}
+        {{- with $.Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ $fn }}
+      automountServiceAccountToken: false
+      {{- with $.Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ default $.Values.global.runAsUser $svc.runAsUser }}
+        runAsGroup: {{ default $.Values.global.runAsUser $svc.runAsUser }}
+        fsGroup: {{ default $.Values.global.runAsUser $svc.runAsUser }}
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "vs.selectorLabels" $ctx | nindent 20 }}
+      {{- with $.Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "vs.image" $ctx }}
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ $svc.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ $fn }}
+          {{- if or $svc.secretEnv $svc.optionalSecretEnv $svc.dependentEnv }}
+          env:
+            {{- range $svc.secretEnv }}
+            - name: {{ . }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vs.secretName" $ }}
+                  key: {{ . }}
+            {{- end }}
+            {{- range $svc.optionalSecretEnv }}
+            - name: {{ . }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vs.secretName" $ }}
+                  key: {{ . }}
+                  optional: true
+            {{- end }}
+            {{- range $k, $v := $svc.dependentEnv }}
+            - name: {{ $k }}
+              value: {{ tpl $v $ | quote }}
+            {{- end }}
+          {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          startupProbe:
+            {{- include "vs.probe" (dict "probe" $svc.probes.startup "path" $svc.probes.liveness.path "root" $ "defaults" (dict "initialDelaySeconds" 0 "periodSeconds" 5 "timeoutSeconds" 3 "failureThreshold" 30)) | nindent 12 }}
+          livenessProbe:
+            {{- include "vs.probe" (dict "probe" $svc.probes.liveness "path" $svc.probes.liveness.path "root" $ "defaults" (dict "initialDelaySeconds" 0 "periodSeconds" 10 "timeoutSeconds" 3 "failureThreshold" 3)) | nindent 12 }}
+          readinessProbe:
+            {{- include "vs.probe" (dict "probe" $svc.probes.readiness "path" $svc.probes.readiness.path "root" $ "defaults" (dict "initialDelaySeconds" 0 "periodSeconds" 10 "timeoutSeconds" 3 "failureThreshold" 3)) | nindent 12 }}
+          resources:
+            {{- toYaml $svc.resources | nindent 12 }}
+          volumeMounts:
+            {{- range $i, $p := $svc.writablePaths }}
+            - name: tmp-{{ $i }}
+              mountPath: {{ $p }}
+            {{- end }}
+      volumes:
+        {{- range $i, $p := $svc.writablePaths }}
+        - name: tmp-{{ $i }}
+          emptyDir: {}
+        {{- end }}
+{{- end }}
+{{- end }}

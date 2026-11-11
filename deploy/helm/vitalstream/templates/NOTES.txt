@@ -1,0 +1,19 @@
+VitalStream {{ .Chart.AppVersion }} installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+APP_ENV={{ .Values.global.appEnv }}. Every service refuses to start unless each secret is set,
+differs from its dev default and has at least 32 characters.
+
+Secrets are read from Secret "{{ include "vs.secretName" . }}". Create it before installing, e.g.:
+
+  kubectl -n {{ .Release.Namespace }} create secret generic {{ include "vs.secretName" . }} \
+    --from-literal=INGEST_API_KEY="$(openssl rand -hex 24)" \
+    --from-literal=COPILOT_ADMIN_TOKEN="$(openssl rand -hex 24)" \
+    --from-literal=MCP_TOKEN="$(openssl rand -hex 24)" \
+    --from-literal=LOG_PSEUDONYM_KEY="$(openssl rand -hex 24)" \
+    --from-literal=POSTGRES_PASSWORD=<database password> \
+    --from-literal=RABBITMQ_PASSWORD=<broker password>
+
+Try a service:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Values.global.namePrefix }}copilot 8083:{{ .Values.services.copilot.port }}
+  curl -H 'Host: localhost' localhost:8083/health

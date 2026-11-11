@@ -1,0 +1,305 @@
+# VitalStream application chart values.
+#
+# Nothing in this file is a real secret. Secrets live in a Kubernetes Secret that you create
+# out of band (or let the chart create from values passed with --set, see `secrets`).
+
+global:
+  # Registry prefix for every image, e.g. 123456789012.dkr.ecr.eu-west-1.amazonaws.com
+  imageRegistry: ""
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets: []
+  # Prefix for every resource name. Empty keeps the CONTRACTS.md service DNS names
+  # (ingest-gateway, clinical-api, copilot, dashboard) so in-cluster URLs match the compose stack.
+  namePrefix: ""
+  # `prod` activates the secret startup guard in every service (CONTRACTS.md 4.1): startup fails
+  # unless each secret is set, differs from its dev default and is at least 32 characters long.
+  appEnv: prod
+  logLevel: INFO
+  clusterDomain: cluster.local
+  # Host header sent by kubelet probes. It must be in every service's ALLOWED_HOSTS.
+  probeHost: localhost
+  # Extra Host header values accepted by every service (ALLOWED_HOSTS).
+  extraAllowedHosts: []
+  # Run every pod as this numeric uid (images use named users, which runAsNonRoot cannot verify).
+  runAsUser: 10001
+
+# Endpoints of the infrastructure the services talk to. Infra is deployed elsewhere
+# (deploy/kind for development, deploy/terraform/aws for AWS).
+infra:
+  kafkaBootstrapServers: kafka:9092
+  redisUrl: redis://redis:6379
+  postgres:
+    host: postgres
+    port: 5432
+    database: vitalstream
+    user: vitalstream
+  cassandraContactPoints: cassandra:9042
+  elasticsearchUrl: http://elasticsearch:9200
+  rabbitmq:
+    host: rabbitmq
+    port: 5672
+    user: vitalstream
+  # Leave empty on AWS. Set to the LocalStack URL for local development.
+  awsEndpointUrl: ""
+  awsRegion: us-east-1
+  # Archive bucket (terraform output archive_bucket). Used for ARCHIVE_URI.
+  archiveBucket: vitalstream-archive
+  # SQS queue NAME; the AWS SDK resolves the URL.
+  sqsQueueName: alert-escalations
+
+secrets:
+  # Name of a Secret you created beforehand. When empty the chart expects `<release>-secrets`.
+  # Required keys: INGEST_API_KEY COPILOT_ADMIN_TOKEN MCP_TOKEN LOG_PSEUDONYM_KEY
+  #                POSTGRES_PASSWORD RABBITMQ_PASSWORD. Optional key: ANTHROPIC_API_KEY.
+  existingSecret: ""
+  # Render the Secret from `secrets.values` (pass them with --set, never commit them).
+  # Ignored when existingSecret is set. Intended for CI and demos; prefer External Secrets in prod.
+  create: false
+  values: {}
+  # Shortest accepted secret when the chart creates it and appEnv is not dev.
+  minLength: 32
+
+networkPolicy:
+  enabled: true
+  # Pod and Service CIDRs of the cluster. Added to the `except` list of every internet egress rule
+  # so "internet" never means "the cluster". Always also excluded: RFC1918, link-local (cloud
+  # metadata), CGNAT and loopback.
+  clusterCIDRs: []
+  internetExceptCIDRs: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, 127.0.0.0/8]
+  # Namespace of the ingress controller allowed to reach services that opt in.
+  ingressControllerNamespaceSelector:
+    kubernetes.io/metadata.name: ingress-nginx
+  # Namespace of the Prometheus that scrapes the metrics endpoints.
+  monitoringNamespaceSelector:
+    kubernetes.io/metadata.name: monitoring
+  infra:
+    # Where in-cluster infra lives (kind). Add VPC CIDRs for managed AWS services.
+    namespaceSelector:
+      kubernetes.io/metadata.name: vitalstream-infra
+    cidrs: []
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  tls: []
+  hosts:
+    - host: vitalstream.example.org
+      paths:
+        - {path: /api/v1/vitals, service: ingest-gateway}
+        - {path: /api/v1/fhir, service: ingest-gateway}
+        - {path: /api/v1/hl7, service: ingest-gateway}
+        - {path: /api/v1/chat, service: copilot}
+        - {path: /api/v1/documents, service: copilot}
+        - {path: /mcp, service: copilot}
+        - {path: /api/v1/patients, service: clinical-api}
+        - {path: /api/v1/alerts, service: clinical-api}
+        - {path: /, service: dashboard}
+
+# One entry per service. `kind` selects defaults: java (Spring Boot), python (FastAPI/Spark), web (nginx).
+services:
+  ingest-gateway:
+    enabled: true
+    kind: java
+    image: {repository: vitalstream/ingest-gateway, tag: ""}
+    port: 8081
+    replicaCount: 2
+    resources:
+      requests: {cpu: 200m, memory: 384Mi}
+      limits: {cpu: "1", memory: 768Mi}
+    autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 6, targetCPUUtilizationPercentage: 70}
+    pdb: {enabled: true, maxUnavailable: 1}
+    probes:
+      liveness: {path: /actuator/health/liveness}
+      readiness: {path: /actuator/health/readiness}
+      startup: {failureThreshold: 30}
+    metricsPath: /actuator/prometheus
+    writablePaths: [/tmp]
+    config:
+      KAFKA_BOOTSTRAP_SERVERS: "{{ .Values.infra.kafkaBootstrapServers }}"
+      REDIS_URL: "{{ .Values.infra.redisUrl }}"
+    secretEnv: [INGEST_API_KEY, LOG_PSEUDONYM_KEY]
+    optionalSecretEnv: []
+    dependentEnv: {}
+    serviceAccount: {annotations: {}}
+    extraAllowedHosts: []
+    networkPolicy:
+      ingressFromServices: []
+      allowIngressController: true
+      allowMonitoring: true
+      egressToServices: []
+      # Kafka plaintext (kind), MSK SASL/IAM over TLS (9098), Redis.
+      infraPorts: [9092, 9098, 6379]
+      egress:
+        internet: {enabled: false, ports: [443], cidrs: [0.0.0.0/0]}
+
+  stream-processor:
+    enabled: true
+    kind: python
+    image: {repository: vitalstream/stream-processor, tag: ""}
+    # /health and /metrics are served on METRICS_PORT. The Spark UI (4040) is optional and not exposed.
+    port: 9404
+    portEnv: METRICS_PORT
+    replicaCount: 1
+    resources:
+      requests: {cpu: 500m, memory: 1Gi}
+      limits: {cpu: "2", memory: 3Gi}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 1, targetCPUUtilizationPercentage: 70}
+    pdb: {enabled: true, maxUnavailable: 1}
+    probes:
+      liveness: {path: /health}
+      readiness: {path: /health}
+      startup: {failureThreshold: 60}
+    metricsPath: /metrics
+    writablePaths: [/tmp]
+    config:
+      KAFKA_BOOTSTRAP_SERVERS: "{{ .Values.infra.kafkaBootstrapServers }}"
+      REDIS_URL: "{{ .Values.infra.redisUrl }}"
+      CASSANDRA_CONTACT_POINTS: "{{ .Values.infra.cassandraContactPoints }}"
+      AWS_REGION: "{{ .Values.infra.awsRegion }}"
+      ARCHIVE_URI: "s3a://{{ .Values.infra.archiveBucket }}/vitals_raw"
+      AWS_ENDPOINT_URL: "{{ .Values.infra.awsEndpointUrl }}"
+    secretEnv: [LOG_PSEUDONYM_KEY]
+    optionalSecretEnv: []
+    dependentEnv: {}
+    # Annotate with the IRSA role that can write the archive bucket (terraform output).
+    serviceAccount: {annotations: {}}
+    extraAllowedHosts: []
+    networkPolicy:
+      ingressFromServices: []
+      allowIngressController: false
+      allowMonitoring: true
+      egressToServices: []
+      # Kafka plaintext/TLS, Redis, Cassandra.
+      infraPorts: [9092, 9098, 6379, 9042]
+      # S3. Prefer a VPC gateway endpoint and disable this (see deploy/README.md).
+      egress:
+        internet: {enabled: true, ports: [443], cidrs: [0.0.0.0/0]}
+
+  clinical-api:
+    enabled: true
+    kind: java
+    image: {repository: vitalstream/clinical-api, tag: ""}
+    port: 8082
+    replicaCount: 2
+    resources:
+      requests: {cpu: 250m, memory: 512Mi}
+      limits: {cpu: "1", memory: 1Gi}
+    autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 6, targetCPUUtilizationPercentage: 70}
+    pdb: {enabled: true, maxUnavailable: 1}
+    probes:
+      liveness: {path: /actuator/health/liveness}
+      readiness: {path: /actuator/health/readiness}
+      startup: {failureThreshold: 30}
+    metricsPath: /actuator/prometheus
+    writablePaths: [/tmp]
+    config:
+      KAFKA_BOOTSTRAP_SERVERS: "{{ .Values.infra.kafkaBootstrapServers }}"
+      REDIS_URL: "{{ .Values.infra.redisUrl }}"
+      POSTGRES_URL: "jdbc:postgresql://{{ .Values.infra.postgres.host }}:{{ .Values.infra.postgres.port }}/{{ .Values.infra.postgres.database }}"
+      POSTGRES_USER: "{{ .Values.infra.postgres.user }}"
+      CASSANDRA_CONTACT_POINTS: "{{ .Values.infra.cassandraContactPoints }}"
+      ELASTICSEARCH_URL: "{{ .Values.infra.elasticsearchUrl }}"
+      AWS_REGION: "{{ .Values.infra.awsRegion }}"
+      AWS_ENDPOINT_URL: "{{ .Values.infra.awsEndpointUrl }}"
+      VITALSTREAM_SQS_QUEUENAME: "{{ .Values.infra.sqsQueueName }}"
+    secretEnv: [LOG_PSEUDONYM_KEY, POSTGRES_PASSWORD, RABBITMQ_PASSWORD]
+    optionalSecretEnv: []
+    # $(VAR) is expanded by Kubernetes from the secret variables declared before it.
+    dependentEnv:
+      RABBITMQ_URL: "amqp://{{ .Values.infra.rabbitmq.user }}:$(RABBITMQ_PASSWORD)@{{ .Values.infra.rabbitmq.host }}:{{ .Values.infra.rabbitmq.port }}"
+    # Annotate with the IRSA role that can send to the alert-escalations queue.
+    serviceAccount: {annotations: {}}
+    extraAllowedHosts: []
+    networkPolicy:
+      ingressFromServices: [dashboard, copilot]
+      allowIngressController: true
+      allowMonitoring: true
+      egressToServices: []
+      # Kafka, Redis, Postgres, Cassandra, Elasticsearch, RabbitMQ.
+      infraPorts: [9092, 9098, 6379, 5432, 9042, 9200, 5672]
+      # SQS. Prefer a VPC interface endpoint and disable this (see deploy/README.md).
+      egress:
+        internet: {enabled: true, ports: [443], cidrs: [0.0.0.0/0]}
+
+  copilot:
+    enabled: true
+    kind: python
+    image: {repository: vitalstream/copilot, tag: ""}
+    port: 8083
+    replicaCount: 1
+    resources:
+      requests: {cpu: 250m, memory: 512Mi}
+      limits: {cpu: "1", memory: 1536Mi}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 3, targetCPUUtilizationPercentage: 70}
+    pdb: {enabled: true, maxUnavailable: 1}
+    probes:
+      liveness: {path: /health}
+      readiness: {path: /health}
+      startup: {failureThreshold: 60}
+    metricsPath: /metrics
+    writablePaths: [/tmp]
+    config:
+      ELASTICSEARCH_URL: "{{ .Values.infra.elasticsearchUrl }}"
+      CLINICAL_API_URL: 'http://{{ .Values.global.namePrefix }}clinical-api:{{ index .Values.services "clinical-api" "port" }}'
+      LLM_PROVIDER: fake
+      LLM_MODEL: claude-sonnet-5-5
+    secretEnv: [COPILOT_ADMIN_TOKEN, MCP_TOKEN, LOG_PSEUDONYM_KEY, POSTGRES_PASSWORD]
+    optionalSecretEnv: [ANTHROPIC_API_KEY]
+    dependentEnv:
+      POSTGRES_URL: "postgresql://{{ .Values.infra.postgres.user }}:$(POSTGRES_PASSWORD)@{{ .Values.infra.postgres.host }}:{{ .Values.infra.postgres.port }}/{{ .Values.infra.postgres.database }}"
+    serviceAccount: {annotations: {}}
+    extraAllowedHosts: []
+    networkPolicy:
+      ingressFromServices: [dashboard]
+      allowIngressController: true
+      allowMonitoring: true
+      egressToServices: [clinical-api]
+      # Postgres, Elasticsearch.
+      infraPorts: [5432, 9200]
+      # Anthropic API. Enable ONLY with LLM_PROVIDER=anthropic and prefer an egress proxy / FQDN
+      # policy (deploy/README.md): copilot executes tool calls driven by model output.
+      egress:
+        internet: {enabled: false, ports: [443], cidrs: [0.0.0.0/0]}
+
+  dashboard:
+    enabled: true
+    kind: web
+    image: {repository: vitalstream/dashboard, tag: ""}
+    port: 3000
+    # nginx-unprivileged runs as uid 101.
+    runAsUser: 101
+    replicaCount: 1
+    resources:
+      requests: {cpu: 25m, memory: 32Mi}
+      limits: {cpu: 200m, memory: 128Mi}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 3, targetCPUUtilizationPercentage: 70}
+    pdb: {enabled: true, maxUnavailable: 1}
+    probes:
+      liveness: {path: /healthz}
+      readiness: {path: /healthz}
+      startup: {failureThreshold: 10}
+    metricsPath: ""
+    # nginx needs its cache and pid directories writable.
+    writablePaths: [/tmp, /var/cache/nginx, /var/run]
+    config:
+      CLINICAL_API_URL: 'http://{{ .Values.global.namePrefix }}clinical-api:{{ index .Values.services "clinical-api" "port" }}'
+      COPILOT_URL: "http://{{ .Values.global.namePrefix }}copilot:{{ .Values.services.copilot.port }}"
+    secretEnv: []
+    optionalSecretEnv: []
+    dependentEnv: {}
+    serviceAccount: {annotations: {}}
+    extraAllowedHosts: []
+    networkPolicy:
+      ingressFromServices: []
+      allowIngressController: true
+      allowMonitoring: false
+      egressToServices: []
+      infraPorts: []
+      egress:
+        internet: {enabled: false, ports: [443], cidrs: [0.0.0.0/0]}
+
+# Pod-level knobs shared by all services.
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
