@@ -145,6 +145,7 @@ Gateway behaviour: validate → idempotency check in Redis → publish to Kafka 
 | POST | `/api/v1/chat` | `{"sessionId","patientId"?,"message"}` → SSE stream: events `token`, `tool_call`, `citation`, `done` |
 | POST | `/api/v1/documents` | ingest markdown guideline(s) into RAG store |
 | GET | `/api/v1/documents/search?q=&k=` | hybrid search debug endpoint |
+| — | (as built) | SSE order: `session` `{sessionId}` → `tool_call` twice per call (`status: running`, then `ok`/`error`) → `citation` `{title, chunkId, provenance}` → `token`… → `done` `{sessionId, correlationId, toolCalls, usage, error?}` (failure = `done` with `error:true`, no separate error event). `POST /api/v1/documents` body `{"documents":[{"title"?,"source"?,"content"}]}`. `ALLOWED_HOSTS` matches host names only (Starlette ignores ports). |
 | — | `/mcp` | MCP server (streamable HTTP). Tools: `get_patient_vitals(patient_id, minutes)`, `list_alerts(patient_id?, severity?)`, `search_guidelines(query, k)`, `compute_news2(rr, spo2, sbp, hr, temp)` |
 
 ### 4.1 Authentication (local-dev model; production = OIDC/JWT at API gateway, see known gaps)
