@@ -117,9 +117,11 @@ tests:
     template: ingress.yaml
     set:
       ingress.enabled: true
-      ingress.hosts[0].host: x.example.org
-      ingress.hosts[0].paths[0].path: /
-      ingress.hosts[0].paths[0].service: nope
+      ingress.hosts:
+        - host: x.example.org
+          paths:
+            - path: /
+              service: nope
     asserts:
       - failedTemplate:
           errorPattern: nope

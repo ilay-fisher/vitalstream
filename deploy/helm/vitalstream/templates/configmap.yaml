@@ -1,0 +1,16 @@
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+{{- $ctx := dict "root" $ "name" $name "svc" $svc }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vs.name" $ctx }}
+  labels:
+    {{- include "vs.labels" $ctx | nindent 4 }}
+data:
+  {{- range $k, $v := (include "vs.config" $ctx | fromJson) }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}
