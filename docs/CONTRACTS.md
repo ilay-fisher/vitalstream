@@ -207,7 +207,11 @@ CREATE TABLE vitals_by_minute (patient_id text, metric text, day date, window_st
 
 ## 7. Correlation & logging fields
 
-JSON log fields: `timestamp`, `level`, `service`, `correlationId`, `message`, plus context keys (`patientId`, `eventId`, `alertId`, `topic`, `partition`, `offset`, `durationMs`). Never log vital values at INFO in bulk.
+JSON log fields: `timestamp`, `level`, `service`, `correlationId`, `message`, plus context keys (`patientRef`, `eventId`, `alertId`, `topic`, `partition`, `offset`, `durationMs`). Never log vital values at INFO in bulk.
+
+**PHI minimisation:** never log raw `patientId` (it is a medical record identifier). Log `patientRef` = first 12 hex chars of HMAC-SHA256(patientId, `LOG_PSEUDONYM_KEY`). Env `LOG_PSEUDONYM_KEY` default `dev-only-pseudonym-key` (must be overridden outside local dev). Same algorithm in every service so refs correlate across logs. Test vector: HMAC-SHA256("P-0001", "dev-only-pseudonym-key") → assert your helper matches the other languages (compute and pin it in a unit test).
+
+**Event-time guard (stream-processor):** before watermarking or any state update, drop events whose `observedAt` is more than 5 min ahead of processing time or older than 24 h; count them (`events_dropped_total{reason}`) and log at WARN with `eventId` only. Prevents watermark poisoning that would suppress alerts.
 
 ## 8. Compose integration
 
