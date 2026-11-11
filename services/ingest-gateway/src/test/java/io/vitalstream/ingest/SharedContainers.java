@@ -14,7 +14,7 @@ public final class SharedContainers {
       new GenericContainer<>(DockerImageName.parse("redis:7.4-alpine")).withExposedPorts(6379);
 
   public static final KafkaContainer KAFKA =
-      new KafkaContainer(DockerImageName.parse("apache/kafka:3.9.0"));
+      new KafkaContainer(DockerImageName.parse("apache/kafka:3.8.0"));
 
   private SharedContainers() {}
 

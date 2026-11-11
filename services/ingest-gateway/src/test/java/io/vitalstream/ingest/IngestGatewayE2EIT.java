@@ -67,7 +67,7 @@ class IngestGatewayE2EIT {
   private final JsonMapper json = JsonMapper.builder().build();
 
   private static String device() {
-    return "DEV-E2E-" + (1000 + (int) (Math.random() * 8999));
+    return "DEV-ABC-" + (1000 + (int) (Math.random() * 8999));
   }
 
   private HttpResponse<String> post(String path, String contentType, String body, String... headers)

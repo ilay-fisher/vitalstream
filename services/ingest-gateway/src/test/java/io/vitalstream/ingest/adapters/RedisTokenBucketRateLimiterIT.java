@@ -73,11 +73,11 @@ class RedisTokenBucketRateLimiterIT {
 
   @Test
   void neverRefillsBeyondBurst() throws InterruptedException {
-    var limiter = new RedisTokenBucketRateLimiter(redis, 1000, 2);
+    var limiter = new RedisTokenBucketRateLimiter(redis, 20, 2);
     String device = freshDevice();
     limiter.tryAcquire(device);
 
-    Thread.sleep(100);
+    Thread.sleep(300);
 
     assertThat(limiter.tryAcquire(device).allowed()).isTrue();
     assertThat(limiter.tryAcquire(device).allowed()).isTrue();
