@@ -23,7 +23,7 @@ EVENT_SCHEMA = StructType(
     ]
 )
 
-MAX_FUTURE_MINUTES = 5
+DEFAULT_MAX_FUTURE_SECONDS = 30  # equals the default watermark delay
 MAX_AGE_HOURS = 24
 _UUID_RE = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 _PATIENT_RE = r"^P-\d{4,}$"
@@ -38,16 +38,21 @@ def _range_ok() -> Column:
     return expr
 
 
-def parse_events(kafka_df: DataFrame, now: Column | None = None) -> DataFrame:
+def parse_events(
+    kafka_df: DataFrame,
+    now: Column | None = None,
+    max_future_seconds: int = DEFAULT_MAX_FUTURE_SECONDS,
+) -> DataFrame:
     """Parse Kafka records into typed event columns plus a `valid` flag and the `correlationId`.
 
     Malformed rows are kept (valid = false) rather than dropped so the caller can count and log
     them before filtering with `valid_only`.
 
-    Well-formed events whose `observedAt` is more than 5 minutes ahead of processing time (`now`,
-    default `current_timestamp()`, fixed per micro-batch) or older than 24 hours get
-    `dropReason` = "future" / "stale". They must be removed before watermarking: one far-future
-    event would otherwise push the watermark forward and silence every later alert.
+    Well-formed events whose `observedAt` is more than `max_future_seconds` ahead of processing
+    time (`now`, default `current_timestamp()`, fixed per micro-batch) or older than 24 hours get
+    `dropReason` = "future" / "stale". They must be removed before watermarking. The watermark is
+    the max event time across all partitions minus its delay, so the allowance must not exceed that
+    (see `assert_skew_within_watermark`); otherwise one future event silences every patient.
     """
     parsed = kafka_df.select(
         F.from_json(F.col("value").cast("string"), EVENT_SCHEMA).alias("e"),
@@ -94,7 +99,7 @@ def parse_events(kafka_df: DataFrame, now: Column | None = None) -> DataFrame:
     )
     processing_time = now if now is not None else F.current_timestamp()
     reason = F.when(
-        F.col("observedAt") > processing_time + F.expr(f"INTERVAL {MAX_FUTURE_MINUTES} MINUTES"),
+        F.col("observedAt") > processing_time + F.expr(f"INTERVAL {max_future_seconds} SECONDS"),
         "future",
     ).when(
         F.col("observedAt") < processing_time - F.expr(f"INTERVAL {MAX_AGE_HOURS} HOURS"), "stale"

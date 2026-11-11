@@ -28,10 +28,14 @@ class Metrics:
             registry=self.registry,
         )
         self.events_processed = Counter(
-            "vitalstream_events_processed_total", "Valid vital-sign events processed", registry=self.registry
+            "vitalstream_events_processed_total",
+            "Valid vital-sign events processed",
+            registry=self.registry,
         )
         self.malformed_events = Counter(
-            "vitalstream_malformed_events_total", "Kafka records dropped as malformed", registry=self.registry
+            "vitalstream_malformed_events_total",
+            "Kafka records dropped as malformed",
+            registry=self.registry,
         )
         self.events_dropped = Counter(
             "vitalstream_events_dropped_total",
@@ -40,7 +44,10 @@ class Metrics:
             registry=self.registry,
         )
         self.batches = Counter(
-            "vitalstream_batches_processed_total", "Micro-batches processed", ["query"], registry=self.registry
+            "vitalstream_batches_processed_total",
+            "Micro-batches processed",
+            ["query"],
+            registry=self.registry,
         )
 
     def render(self) -> bytes:

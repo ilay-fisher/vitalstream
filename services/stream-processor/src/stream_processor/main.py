@@ -8,7 +8,7 @@ import time
 
 import redis
 
-from stream_processor.config import Settings
+from stream_processor.config import Settings, assert_skew_within_watermark
 from stream_processor.listener import ProgressLogger
 from stream_processor.logging_setup import configure_logging, get_logger
 from stream_processor.metrics import Metrics, start_http_server
@@ -26,6 +26,7 @@ def main() -> None:
     configure_logging(settings.service_name, settings.log_level)
     log = get_logger()
     check_secrets(settings)
+    assert_skew_within_watermark(settings.max_future_skew_seconds, settings.watermark_seconds)
     metrics = Metrics()
     queries: list[object] = []
 

@@ -290,7 +290,7 @@ def read_events(spark: SparkSession, settings: Settings) -> DataFrame:
         .option("includeHeaders", "true")
         .option("failOnDataLoss", "false")
     )
-    return parse_events(reader.load())
+    return parse_events(reader.load(), max_future_seconds=settings.max_future_skew_seconds)
 
 
 def _trigger(settings: Settings) -> dict[str, Any]:

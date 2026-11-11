@@ -32,6 +32,31 @@ def _bool(env: Mapping[str, str], name: str, default: bool) -> bool:
     raise ValueError(f"{name} must be a boolean, got {raw!r}")
 
 
+_UNIT_SECONDS = {"second": 1, "minute": 60, "hour": 3600}
+
+
+def parse_interval_seconds(text: str, name: str = "interval") -> int:
+    """Parse "30 seconds" / "1 minute" / "2 hours" into whole seconds."""
+    parts = text.strip().lower().split()
+    if len(parts) == 2 and parts[0].isdigit() and parts[1].rstrip("s") in _UNIT_SECONDS:
+        return int(parts[0]) * _UNIT_SECONDS[parts[1].rstrip("s")]
+    raise ValueError(f"{name} must look like '30 seconds', got {text!r}")
+
+
+def assert_skew_within_watermark(max_future_skew_seconds: int, watermark_seconds: int) -> None:
+    """Fail fast if the future-event allowance could move the watermark past real time.
+
+    Spark's watermark is the maximum event time seen across all partitions minus the delay, so an
+    event `d` seconds ahead of processing time moves it to now + d - watermark. Only d <= watermark
+    keeps it from overtaking real time and turning every on-time event into a late one.
+    """
+    if max_future_skew_seconds > watermark_seconds:
+        raise ValueError(
+            f"MAX_FUTURE_SKEW ({max_future_skew_seconds}s) must not exceed the watermark delay "
+            f"({watermark_seconds}s)"
+        )
+
+
 def _split_host_port(contact_points: str, default_port: int = 9042) -> tuple[str, int]:
     first = contact_points.split(",")[0].strip()
     host, _, port = first.partition(":")
@@ -71,6 +96,16 @@ class Settings:
     app_env: str
     service_name: str = "stream-processor"
 
+    @property
+    def watermark_seconds(self) -> int:
+        """Watermark delay in seconds."""
+        return parse_interval_seconds(self.watermark, "WATERMARK")
+
+    @property
+    def max_future_skew_seconds(self) -> int:
+        """Largest accepted `observedAt` lead over processing time; derived, never configured."""
+        return self.watermark_seconds
+
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Settings:
         """Build settings from an environment mapping (pass `os.environ`)."""
@@ -79,6 +114,7 @@ class Settings:
             raise ValueError(
                 f"TRIGGER_MODE must be processingTime or availableNow, got {trigger_mode!r}"
             )
+        parse_interval_seconds(env.get("WATERMARK", "30 seconds"), "WATERMARK")
         host, port = _split_host_port(env.get("CASSANDRA_CONTACT_POINTS", "localhost:9042"))
         return cls(
             kafka_bootstrap_servers=env.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),

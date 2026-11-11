@@ -38,10 +38,11 @@ the small per-batch result on the driver, which keeps every rule unit-testable w
 
 ## Safety guards
 
-* **Event-time guard.** Readings with `observedAt` more than 5 min ahead of processing time or older
-  than 24 h are dropped before watermarking and before any sink or state update
-  (`vitalstream_events_dropped_total{reason=future|stale}`, WARN with `eventId` only). Without it a
-  single far-future event would push the watermark forward and silence every later alert.
+* **Event-time guard.** Readings with `observedAt` more than `MAX_FUTURE_SKEW` ahead of processing
+  time or older than 24 h are dropped before watermarking and before any sink or state update
+  (`vitalstream_events_dropped_total{reason=future|stale}`, WARN with `eventId` only).
+  `MAX_FUTURE_SKEW` is **derived from the watermark delay (30 s)**, not configurable on its own, and
+  startup asserts `skew <= watermark`. See *Watermark poisoning* below.
 * **PHI-free logs.** Logs carry `patientRef` = first 12 hex of HMAC-SHA256(patientId, `LOG_PSEUDONYM_KEY`),
   never the raw `patientId`.
 * **Secret guard.** `APP_ENV != dev` plus an empty/default/short (<32) `LOG_PSEUDONYM_KEY` aborts startup;
@@ -157,6 +158,14 @@ CONTRACTS section 5 DDL used by tests. Locally the connector jars are resolved t
 * JVM/Spark library logs are plain log4j text (not JSON).
 
 ## Design decisions and limits
+
+* **Watermark poisoning.** Spark's watermark is the max event time across *all* partitions minus the
+  delay. One event at now+D therefore moves the global watermark to now+D-30 s, and for D > 30 s
+  every on-time event of every patient becomes "late" and is silently dropped, suppressing alerts
+  (the gateway's 5 min future allowance is too coarse to prevent this). Capping the allowance at the
+  watermark delay keeps the watermark from ever passing real time. Verified by a streaming test
+  that feeds +31 s, +5 min and +1 h events and shows another patient's window is still aggregated
+  and alerted, plus a control run without the guard where it is not.
 
 * Per-batch detection runs on the driver (collects only the batch's windows/readings). Fine for
   the project's scale; for much higher volume move EWMA to `applyInPandasWithState`.

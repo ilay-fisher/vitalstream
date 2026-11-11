@@ -2,7 +2,8 @@
 
 Usage: python scripts/demo_stream.py --bootstrap localhost:22092 [--minutes 18]
 
-Event time is anchored to "now" (inside the 24 h guard); the seed makes values reproducible. Every reading carries a
+Event time is anchored to "now" (inside the 24 h guard); the seed makes values reproducible.
+Every reading carries a
 `correlationId` header, like the ingest-gateway does.
 """
 
