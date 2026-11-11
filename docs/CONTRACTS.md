@@ -125,6 +125,8 @@ All JSON. Errors use RFC 9457 `application/problem+json`. All endpoints accept/r
 | POST | `/api/v1/fhir/Observation` | FHIR R4 Observation (single) or Bundle (`type: batch`) | 202 same shape |
 | POST | `/api/v1/hl7` | `text/plain` HL7 v2.5 ORU^R01 | 202 + HL7 ACK (AA/AE) in body |
 
+HL7 mapping: PID-3 → patientId, OBX-3 LOINC → metric, OBX-5 → value, OBX-14 → observedAt, OBX-18 (equipment instance identifier) → deviceId.
+
 Gateway behaviour: validate → idempotency check in Redis → publish to Kafka (`acks=all`, idempotent producer) → 202. Rate limit per device: token bucket in Redis, 50 req/s burst 100 → 429 with `Retry-After`.
 
 ### clinical-api (8082)
@@ -148,7 +150,7 @@ As built (clinical-api response shapes):
 | `GET /patients/{id}/vitals` | `{patientId, resolution:"RAW"\|"MINUTE", from, to, points:[…]}`. RAW point `{observedAt, metric, value, unit, deviceId}`; MINUTE point `{observedAt (window start), metric, min, max, avg, count}`. `resolution` query param is case-insensitive. |
 | `GET /alerts` | page `{items:[AlertView], page, size, totalElements, totalPages}`; `q` searches Elasticsearch (there is no `/alerts/search`) |
 | `AlertView` | `{alertId, patientId, type, severity, metric, value, score, message, windowStart, windowEnd, detectedAt, status, acknowledgedBy, acknowledgedAt, acknowledgementNote, version}` |
-| `POST /alerts/{id}/ack` | 200 AlertView; already acknowledged / stale version → 409 |
+| `POST /alerts/{id}/ack` | 200 AlertView; already acknowledged / stale version → 409. The client sends no version: the server reads the current version and does a compare-and-set update (optimistic locking). |
 | `GET /alerts/stream` | SSE `event: alert`, `id: <alertId>:<version>`, data AlertView. No replay on reconnect. |
 | Errors | `application/problem+json`; 400 validation, 404 unknown id, 409 conflict, 503 dependency down |
 
@@ -158,7 +160,7 @@ As built (clinical-api response shapes):
 | POST | `/api/v1/chat` | `{"sessionId","patientId"?,"message"}` → SSE stream: events `token`, `tool_call`, `citation`, `done` |
 | POST | `/api/v1/documents` | ingest markdown guideline(s) into RAG store |
 | GET | `/api/v1/documents/search?q=&k=` | hybrid search debug endpoint |
-| — | (as built) | SSE order: `session` `{sessionId}` → `tool_call` twice per call (`status: running`, then `ok`/`error`) → `citation` `{title, chunkId, provenance}` → `token`… → `done` `{sessionId, correlationId, toolCalls, usage, error?}` (failure = `done` with `error:true`, no separate error event). `POST /api/v1/documents` body `{"documents":[{"title"?,"source"?,"content"}]}`. `ALLOWED_HOSTS` matches host names only (Starlette ignores ports). |
+| — | (as built) | SSE order: `session` `{sessionId}` → `tool_call` twice per call (`status: running`, then `ok`/`error`) → `citation` `{title, chunkId, provenance}` → `token`… → `done` `{sessionId, correlationId, toolCalls, usage, error?}` (failure = `done` with `error:true`, no separate error event). `POST /api/v1/documents` body `{"documents":[{"title"?,"source"?,"content"}]}`. `ALLOWED_HOSTS` matches host names only (Starlette ignores ports). `done.usage` = `{inputTokens, outputTokens}` (fake LLM reports 0 output tokens). |
 | — | `/mcp` | MCP server (streamable HTTP). Tools: `get_patient_vitals(patient_id, minutes)`, `list_alerts(patient_id?, severity?)`, `search_guidelines(query, k)`, `compute_news2(rr, spo2, sbp, hr, temp)` |
 
 ### 4.1 Authentication (local-dev model; production = OIDC/JWT at API gateway, see known gaps)
