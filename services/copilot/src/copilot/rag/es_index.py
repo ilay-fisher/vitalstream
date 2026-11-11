@@ -13,6 +13,7 @@ _MAPPING = {
         "document_id": {"type": "keyword"},
         "title": {"type": "text", "analyzer": "english"},
         "content": {"type": "text", "analyzer": "english"},
+        "provenance": {"type": "keyword"},
     }
 }
 
@@ -40,6 +41,7 @@ class EsKeywordIndex:
                     "document_id": c.document_id,
                     "title": c.title,
                     "content": c.content,
+                    "provenance": c.provenance,
                 },
             }
             for c in chunks
@@ -75,6 +77,7 @@ class EsKeywordIndex:
                 document_id=hit["_source"]["document_id"],
                 title=hit["_source"]["title"],
                 content=hit["_source"]["content"],
+                provenance=hit["_source"].get("provenance", "api-upload"),
             )
             for hit in response["hits"]["hits"]
         ]

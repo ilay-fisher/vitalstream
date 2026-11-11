@@ -71,6 +71,7 @@ class Retriever:
                 score=score,
                 vector_rank=vector_rank.get(chunk_id),
                 bm25_rank=bm25_rank.get(chunk_id),
+                provenance=by_id[chunk_id].provenance,
             )
             for chunk_id, score in fused[:k]
         ]

@@ -161,6 +161,7 @@ class CopilotTools:
                     "document_id": h.document_id,
                     "title": h.title,
                     "content": h.content,
+                    "provenance": h.provenance,
                     "score": round(h.score, 6),
                 }
                 for h in hits

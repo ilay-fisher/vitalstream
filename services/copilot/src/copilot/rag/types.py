@@ -13,6 +13,7 @@ class Candidate:
     document_id: str
     title: str
     content: str
+    provenance: str = "api-upload"
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +27,7 @@ class SearchHit:
     score: float
     vector_rank: int | None
     bm25_rank: int | None
+    provenance: str = "api-upload"
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +48,7 @@ class StoredChunk:
     title: str
     ordinal: int
     content: str
+    provenance: str = "api-upload"
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,9 +109,9 @@ class DocumentStore(Protocol):
     """System of record for documents and chunk embeddings."""
 
     async def add_document(
-        self, title: str, source: str, chunks: Sequence[NewChunk]
+        self, title: str, source: str, chunks: Sequence[NewChunk], provenance: str
     ) -> StoredDocument:
-        """Persist a document and its chunks atomically."""
+        """Persist a document (with its provenance) and its chunks atomically."""
         ...
 
     async def delete_document(self, document_id: str) -> None:

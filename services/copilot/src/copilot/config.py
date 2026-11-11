@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     clinical_api_url: str = "http://localhost:8082"
     http_timeout_seconds: float = 10.0
 
+    copilot_admin_token: SecretStr = SecretStr("dev-admin-token")
+    mcp_token: SecretStr = SecretStr("dev-mcp-token")
+    log_pseudonym_key: SecretStr = SecretStr("dev-only-pseudonym-key")
+    mcp_allowed_hosts: str = "localhost:8083,127.0.0.1:8083,copilot:8083"
+
     llm_provider: Literal["fake", "anthropic"] = "fake"
     anthropic_api_key: SecretStr | None = None
     llm_model: str = "claude-sonnet-5-5"
@@ -57,6 +62,11 @@ class Settings(BaseSettings):
             if url.startswith(prefix):
                 return "postgresql+asyncpg://" + url[len(prefix) :]
         return url
+
+    @property
+    def mcp_host_list(self) -> list[str]:
+        """Host header values accepted by /mcp (DNS-rebinding protection)."""
+        return [h.strip() for h in self.mcp_allowed_hosts.split(",") if h.strip()]
 
     @property
     def cors_origin_list(self) -> list[str]:
