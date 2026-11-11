@@ -70,4 +70,23 @@ class HostAllowlistFilterTest {
     assertThat(call(custom, "10.0.0.5:8082").getStatus()).isEqualTo(200);
     assertThat(call(custom, "localhost").getStatus()).isEqualTo(400);
   }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "/%61pi/v1/patients",
+        "/api/v1;x=1/patients",
+        "/api/v1/%2e%2e/patients",
+        "/actuator/health;a=b"
+      })
+  void rejectionDoesNotDependOnHowThePathIsSpelled(String uri) throws Exception {
+    MockHttpServletRequest request = new MockHttpServletRequest("GET", uri);
+    request.setLocalPort(8082);
+    request.addHeader("Host", "evil.example.com");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    filter.doFilter(request, response, new MockFilterChain());
+
+    assertThat(response.getStatus()).isEqualTo(400);
+  }
 }

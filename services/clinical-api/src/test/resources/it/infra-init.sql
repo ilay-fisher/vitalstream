@@ -1,10 +1,10 @@
--- Mimics the foundation init script: schema + patients seed exist BEFORE clinical-api's Flyway runs.
+-- Mirrors infra/postgres/init.sql (NOT NULL columns, seeded rows): schema + patients seed exist BEFORE clinical-api's Flyway runs.
 CREATE SCHEMA IF NOT EXISTS clinical;
 CREATE TABLE IF NOT EXISTS clinical.patients (
     id text PRIMARY KEY,
-    name text,
-    bed text,
-    ward text,
+    name text NOT NULL,
+    bed text NOT NULL,
+    ward text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now()
 );
 INSERT INTO clinical.patients (id, name, bed, ward) VALUES

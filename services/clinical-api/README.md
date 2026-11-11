@@ -173,7 +173,7 @@ sequenceDiagram
 
 ## Metrics
 
-`alerts_consumed_total{outcome}`, `alerts_suppressed_total`, `alerts_dlq_total`,
+`alerts_consumed_total{outcome}`, `alerts_suppressed_total`, `alerts_dlq_total`, `vitalstream_alerts_raised_total{severity,type}` (alerts persisted, CONTRACTS section 7),
 `outbox_lag_seconds` (age of oldest unpublished row), `notifications_sent_total{channel=rabbitmq|sqs}`,
 `cache_requests_total{cache="vitals",result=hit|miss}` plus the standard JVM/HTTP/Kafka metrics.
 

@@ -39,6 +39,8 @@ class AlertPipelineIT extends IntegrationTestBase {
     var sqs = sqsMessagesFor(id, Duration.ofSeconds(5));
 
     assertThat(rabbit).hasSize(1);
+    assertThat(get("/actuator/prometheus").body())
+        .containsPattern("vitalstream_alerts_raised_total\\{[^}]*severity=\"CRITICAL\"");
     assertThat(rabbit.getFirst().getEnvelope().getRoutingKey()).isEqualTo("alert.critical");
     assertThat(rabbit.getFirst().getProps().getHeaders().get("correlationId").toString())
         .isEqualTo("corr-pipeline-1");

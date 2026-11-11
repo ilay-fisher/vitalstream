@@ -67,6 +67,11 @@ class AlertIngestServiceTest {
     assertThat(rows.getAllValues().getFirst().payload()).contains("corr-1");
     verify(liveFeed).publish(any(AlertView.class));
     assertThat(meters.counter("alerts.consumed", "outcome", "persisted").count()).isEqualTo(1.0);
+    assertThat(
+            meters
+                .counter("vitalstream_alerts_raised", "severity", "CRITICAL", "type", "THRESHOLD")
+                .count())
+        .isEqualTo(1.0);
   }
 
   @Test
@@ -108,6 +113,11 @@ class AlertIngestServiceTest {
     verifyNoInteractions(suppression, liveFeed);
     verify(outbox, never()).add(any());
     assertThat(meters.counter("alerts.consumed", "outcome", "duplicate").count()).isEqualTo(1.0);
+    assertThat(
+            meters
+                .counter("vitalstream_alerts_raised", "severity", "CRITICAL", "type", "THRESHOLD")
+                .count())
+        .isZero();
   }
 
   @Test
