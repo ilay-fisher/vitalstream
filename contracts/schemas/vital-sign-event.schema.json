@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vitalstream.local/schemas/vital-sign-event.schema.json",
+  "title": "VitalSignEvent",
+  "description": "One vital-sign reading on topic vitals.raw (CONTRACTS 3.1). Metric, unit, LOINC and value range are coupled per metric.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "eventId",
+    "patientId",
+    "deviceId",
+    "metric",
+    "value",
+    "unit",
+    "loinc",
+    "observedAt",
+    "ingestedAt",
+    "source"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Idempotency key"
+    },
+    "patientId": {
+      "type": "string",
+      "pattern": "^P-\\d{4,}$"
+    },
+    "deviceId": {
+      "type": "string",
+      "pattern": "^DEV-[A-Z]+-\\d{4,}$"
+    },
+    "metric": {
+      "enum": [
+        "HEART_RATE",
+        "SPO2",
+        "RESP_RATE",
+        "SYSTOLIC_BP",
+        "DIASTOLIC_BP",
+        "TEMPERATURE"
+      ]
+    },
+    "value": {
+      "type": "number"
+    },
+    "unit": {
+      "type": "string",
+      "description": "UCUM"
+    },
+    "loinc": {
+      "type": "string"
+    },
+    "observedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$",
+      "description": "UTC; consumers reject more than 5 min in the future (not expressible in JSON Schema)"
+    },
+    "ingestedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$",
+      "description": "Set by the gateway"
+    },
+    "source": {
+      "enum": [
+        "FHIR",
+        "HL7V2",
+        "DEVICE_BATCH"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "metric": {
+            "const": "HEART_RATE"
+          }
+        },
+        "required": [
+          "metric"
+        ]
+      },
+      "then": {
+        "properties": {
+          "unit": {
+            "const": "/min"
+          },
+          "loinc": {
+            "const": "8867-4"
+          },
+          "value": {
+            "minimum": 20,
+            "maximum": 250
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "metric": {
+            "const": "SPO2"
+          }
+        },
+        "required": [
+          "metric"
+        ]
+      },
+      "then": {
+        "properties": {
+          "unit": {
+            "const": "%"
+          },
+          "loinc": {
+            "const": "59408-5"
+          },
+          "value": {
+            "minimum": 50,
+            "maximum": 100
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "metric": {
+            "const": "RESP_RATE"
+          }
+        },
+        "required": [
+          "metric"
+        ]
+      },
+      "then": {
+        "properties": {
+          "unit": {
+            "const": "/min"
+          },
+          "loinc": {
+            "const": "9279-1"
+          },
+          "value": {
+            "minimum": 4,
+            "maximum": 60
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "metric": {
+            "const": "SYSTOLIC_BP"
+          }
+        },
+        "required": [
+          "metric"
+        ]
+      },
+      "then": {
+        "properties": {
+          "unit": {
+            "const": "mm[Hg]"
+          },
+          "loinc": {
+            "const": "8480-6"
+          },
+          "value": {
+            "minimum": 50,
+            "maximum": 260
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "metric": {
+            "const": "DIASTOLIC_BP"
+          }
+        },
+        "required": [
+          "metric"
+        ]
+      },
+      "then": {
+        "properties": {
+          "unit": {
+            "const": "mm[Hg]"
+          },
+          "loinc": {
+            "const": "8462-4"
+          },
+          "value": {
+            "minimum": 20,
+            "maximum": 160
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "metric": {
+            "const": "TEMPERATURE"
+          }
+        },
+        "required": [
+          "metric"
+        ]
+      },
+      "then": {
+        "properties": {
+          "unit": {
+            "const": "Cel"
+          },
+          "loinc": {
+            "const": "8310-5"
+          },
+          "value": {
+            "minimum": 30,
+            "maximum": 43
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "settings": {"number_of_shards": 1, "number_of_replicas": 0},
+  "mappings": {
+    "properties": {
+      "alertId": {"type": "keyword"},
+      "patientId": {"type": "keyword"},
+      "type": {"type": "keyword"},
+      "severity": {"type": "keyword"},
+      "status": {"type": "keyword"},
+      "metric": {"type": "keyword"},
+      "value": {"type": "double"},
+      "score": {"type": "double"},
+      "message": {"type": "text", "analyzer": "english"},
+      "windowStart": {"type": "date"},
+      "windowEnd": {"type": "date"},
+      "detectedAt": {"type": "date"},
+      "acknowledgedBy": {"type": "keyword"},
+      "acknowledgedAt": {"type": "date"}
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "vhosts": [{"name": "/"}],
+  "exchanges": [
+    {"name": "alerts.notify", "vhost": "/", "type": "topic", "durable": true, "auto_delete": false, "internal": false, "arguments": {}},
+    {"name": "alerts.notify.dlx", "vhost": "/", "type": "fanout", "durable": true, "auto_delete": false, "internal": false, "arguments": {}}
+  ],
+  "queues": [
+    {"name": "notify.critical", "vhost": "/", "durable": true, "auto_delete": false,
+     "arguments": {"x-dead-letter-exchange": "alerts.notify.dlx"}},
+    {"name": "notify.all", "vhost": "/", "durable": true, "auto_delete": false,
+     "arguments": {"x-dead-letter-exchange": "alerts.notify.dlx"}},
+    {"name": "alerts.notify.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": {}}
+  ],
+  "bindings": [
+    {"source": "alerts.notify", "vhost": "/", "destination": "notify.critical", "destination_type": "queue", "routing_key": "alert.critical", "arguments": {}},
+    {"source": "alerts.notify", "vhost": "/", "destination": "notify.all", "destination_type": "queue", "routing_key": "alert.*", "arguments": {}},
+    {"source": "alerts.notify.dlx", "vhost": "/", "destination": "alerts.notify.dlq", "destination_type": "queue", "routing_key": "", "arguments": {}}
+  ]
+}

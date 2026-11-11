@@ -1,0 +1,11 @@
+{
+  "settings": {"number_of_shards": 1, "number_of_replicas": 0},
+  "mappings": {
+    "properties": {
+      "chunk_id": {"type": "keyword"},
+      "document_id": {"type": "keyword"},
+      "title": {"type": "text", "analyzer": "english", "fields": {"raw": {"type": "keyword"}}},
+      "content": {"type": "text", "analyzer": "english"}
+    }
+  }
+}

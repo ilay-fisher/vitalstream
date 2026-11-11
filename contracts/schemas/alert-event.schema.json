@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vitalstream.local/schemas/alert-event.schema.json",
+  "title": "AlertEvent",
+  "description": "Alert on topic alerts.detected (CONTRACTS 3.2). alertId is UUIDv5 of patientId|type|metric|windowStart.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "alertId",
+    "patientId",
+    "type",
+    "severity",
+    "metric",
+    "value",
+    "score",
+    "message",
+    "windowStart",
+    "windowEnd",
+    "detectedAt"
+  ],
+  "properties": {
+    "alertId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "patientId": {
+      "type": "string",
+      "pattern": "^P-\\d{4,}$"
+    },
+    "type": {
+      "enum": [
+        "THRESHOLD",
+        "TREND_ZSCORE",
+        "NEWS2",
+        "ML_ANOMALY"
+      ]
+    },
+    "severity": {
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+        "CRITICAL"
+      ]
+    },
+    "metric": {
+      "enum": [
+        "HEART_RATE",
+        "SPO2",
+        "RESP_RATE",
+        "SYSTOLIC_BP",
+        "DIASTOLIC_BP",
+        "TEMPERATURE",
+        null
+      ]
+    },
+    "value": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "score": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1
+    },
+    "windowStart": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "windowEnd": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "detectedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    }
+  }
+}

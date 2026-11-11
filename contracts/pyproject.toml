@@ -1,0 +1,16 @@
+[project]
+name = "vitalstream-contracts"
+version = "0.1.0"
+description = "JSON Schemas and sample payloads for VitalStream, with the tests that guard them"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8", "jsonschema>=4.21", "rfc3339-validator>=0.1.4", "ruff>=0.5"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+
+[tool.ruff]
+line-length = 100

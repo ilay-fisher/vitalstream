@@ -1,0 +1,24 @@
+{
+  "deviceId": "DEV-ICU-0001",
+  "patientId": "P-0001",
+  "readings": [
+    {
+      "eventId": "00000000-0000-0000-0000-00000000000a",
+      "metric": "HEART_RATE",
+      "value": 118.0,
+      "observedAt": "2026-11-11T20:15:30.123Z"
+    },
+    {
+      "eventId": "00000000-0000-0000-0000-00000000000b",
+      "metric": "SPO2",
+      "value": 94.0,
+      "observedAt": "2026-11-11T20:15:30.123Z"
+    },
+    {
+      "eventId": "00000000-0000-0000-0000-00000000000c",
+      "metric": "RESP_RATE",
+      "value": 22.0,
+      "observedAt": "2026-11-11T20:15:30.123Z"
+    }
+  ]
+}

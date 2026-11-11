@@ -1,0 +1,13 @@
+{
+  "alertId": "0b7f9c3e-2a41-4f7e-9d0d-5c1a2b3c4d5e",
+  "patientId": "P-0001",
+  "type": "MAGIC",
+  "severity": "HIGH",
+  "metric": null,
+  "value": null,
+  "score": 7.0,
+  "message": "NEWS2 score 7 (RR 25, SpO2 91, HR 131)",
+  "windowStart": "2026-11-11T20:15:00Z",
+  "windowEnd": "2026-11-11T20:16:00Z",
+  "detectedAt": "2026-11-11T20:16:02.010Z"
+}

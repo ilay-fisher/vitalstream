@@ -1,0 +1,346 @@
+# VitalStream infrastructure (CONTRACTS section 1 and 8).
+#
+# Paths below are relative to the REPO ROOT: always run with `--project-directory .`
+# (the Makefile does). Example: docker compose --project-directory . -f infra/compose.yaml up -d
+name: vitalstream
+
+x-healthcheck-defaults: &hc
+  interval: 10s
+  timeout: 5s
+  retries: 12
+
+x-init: &init
+  restart: "no"
+  networks: [vitalstream]
+
+services:
+  # ---------------------------------------------------------------- Kafka (KRaft, single node)
+  kafka:
+    image: apache/kafka:3.8.1
+    container_name: vitalstream-kafka
+    ports: ["127.0.0.1:9092:9092"]
+    environment:
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:29092,EXTERNAL://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: "-Xms512m -Xmx512m"
+    mem_limit: 1g
+    volumes: [kafka-data:/var/lib/kafka/data]
+    healthcheck:
+      <<: *hc
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:29092 >/dev/null 2>&1"]
+      start_period: 30s
+    networks: [vitalstream]
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    container_name: vitalstream-kafka-ui
+    ports: ["127.0.0.1:8090:8080"]
+    environment:
+      KAFKA_CLUSTERS_0_NAME: vitalstream
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      DYNAMIC_CONFIG_ENABLED: "false"
+    mem_limit: 512m
+    depends_on:
+      kafka: {condition: service_healthy}
+    healthcheck:
+      <<: *hc
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP"]
+      start_period: 30s
+    networks: [vitalstream]
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.8.0
+    container_name: vitalstream-kafka-exporter
+    command: ["--kafka.server=kafka:29092"]
+    ports: ["127.0.0.1:9308:9308"]
+    mem_limit: 128m
+    depends_on:
+      kafka: {condition: service_healthy}
+    healthcheck:
+      <<: *hc
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9308/healthz >/dev/null"]
+      start_period: 10s
+    networks: [vitalstream]
+
+  init-kafka:
+    <<: *init
+    image: apache/kafka:3.8.1
+    container_name: vitalstream-init-kafka
+    entrypoint: ["/bin/bash", "/init/init-topics.sh"]
+    volumes: ["./infra/kafka/init-topics.sh:/init/init-topics.sh:ro"]
+    depends_on:
+      kafka: {condition: service_healthy}
+
+  # ---------------------------------------------------------------- PostgreSQL + pgvector
+  postgres:
+    image: pgvector/pgvector:0.8.0-pg16
+    container_name: vitalstream-postgres
+    ports: ["127.0.0.1:5433:5432"]
+    environment:
+      POSTGRES_DB: vitalstream
+      POSTGRES_USER: vitalstream
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vitalstream}
+    mem_limit: 512m
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      <<: *hc
+      test: ["CMD-SHELL", "pg_isready -U vitalstream -d vitalstream"]
+      start_period: 10s
+    networks: [vitalstream]
+
+  init-postgres:
+    <<: *init
+    image: pgvector/pgvector:0.8.0-pg16
+    container_name: vitalstream-init-postgres
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-vitalstream}
+    entrypoint: ["psql", "-v", "ON_ERROR_STOP=1", "-h", "postgres", "-U", "vitalstream", "-d", "vitalstream", "-f", "/init/init.sql"]
+    volumes: ["./infra/postgres/init.sql:/init/init.sql:ro"]
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  # ---------------------------------------------------------------- Redis
+  redis:
+    image: redis:7.4.1-alpine
+    container_name: vitalstream-redis
+    ports: ["127.0.0.1:6379:6379"]
+    mem_limit: 256m
+    volumes: [redis-data:/data]
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "redis-cli", "ping"]
+    networks: [vitalstream]
+
+  # ---------------------------------------------------------------- Cassandra
+  cassandra:
+    image: cassandra:4.1.7
+    container_name: vitalstream-cassandra
+    ports: ["127.0.0.1:9042:9042"]
+    environment:
+      CASSANDRA_CLUSTER_NAME: vitalstream
+      CASSANDRA_DC: datacenter1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      MAX_HEAP_SIZE: 1G
+      HEAP_NEWSIZE: 256M
+    mem_limit: 2g
+    volumes: [cassandra-data:/var/lib/cassandra]
+    healthcheck:
+      <<: *hc
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES' >/dev/null 2>&1"]
+      interval: 15s
+      retries: 20
+      start_period: 60s
+    networks: [vitalstream]
+
+  init-cassandra:
+    <<: *init
+    image: cassandra:4.1.7
+    container_name: vitalstream-init-cassandra
+    entrypoint: ["cqlsh", "cassandra", "-f", "/init/init.cql"]
+    volumes: ["./infra/cassandra/init.cql:/init/init.cql:ro"]
+    depends_on:
+      cassandra: {condition: service_healthy}
+
+  # ---------------------------------------------------------------- Elasticsearch (+ Kibana under profile tools)
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    container_name: vitalstream-elasticsearch
+    ports: ["127.0.0.1:9200:9200"]
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      cluster.routing.allocation.disk.threshold_enabled: "false"
+    ulimits:
+      memlock: {soft: -1, hard: -1}
+    mem_limit: 1g
+    volumes: [elasticsearch-data:/usr/share/elasticsearch/data]
+    healthcheck:
+      <<: *hc
+      test: ["CMD-SHELL", "curl -sf 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null"]
+      start_period: 30s
+    networks: [vitalstream]
+
+  init-elasticsearch:
+    <<: *init
+    image: curlimages/curl:8.10.1
+    container_name: vitalstream-init-elasticsearch
+    entrypoint: ["/bin/sh", "/init/init.sh"]
+    environment:
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    volumes: ["./infra/elasticsearch:/init:ro"]
+    depends_on:
+      elasticsearch: {condition: service_healthy}
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.3
+    container_name: vitalstream-kibana
+    profiles: [tools]
+    ports: ["127.0.0.1:5601:5601"]
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    mem_limit: 1g
+    depends_on:
+      elasticsearch: {condition: service_healthy}
+    healthcheck:
+      <<: *hc
+      test: ["CMD-SHELL", "curl -sf http://localhost:5601/api/status | grep -q '\"level\":\"available\"'"]
+      start_period: 60s
+    networks: [vitalstream]
+
+  # ---------------------------------------------------------------- RabbitMQ (topology via definitions.json)
+  rabbitmq:
+    image: rabbitmq:3.13.7-management-alpine
+    container_name: vitalstream-rabbitmq
+    ports: ["127.0.0.1:5672:5672", "127.0.0.1:15672:15672"]
+    environment:
+      RABBITMQ_DEFAULT_USER: vitalstream
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-vitalstream}
+    mem_limit: 512m
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      start_period: 30s
+    networks: [vitalstream]
+
+  # definitions.json is imported through the management API (not load_definitions) so the default user from env still exists.
+  init-rabbitmq:
+    <<: *init
+    image: curlimages/curl:8.10.1
+    container_name: vitalstream-init-rabbitmq
+    environment:
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-vitalstream}
+    entrypoint: ["/bin/sh", "-c", "curl -sf -u vitalstream:$$RABBITMQ_PASSWORD -X POST -H 'Content-Type: application/json' --data-binary @/init/definitions.json http://rabbitmq:15672/api/definitions && echo rabbitmq definitions imported"]
+    volumes: ["./infra/rabbitmq/definitions.json:/init/definitions.json:ro"]
+    depends_on:
+      rabbitmq: {condition: service_healthy}
+
+  # ---------------------------------------------------------------- LocalStack (S3, SQS; init hook creates resources)
+  localstack:
+    image: localstack/localstack:3.8.1
+    container_name: vitalstream-localstack
+    ports: ["127.0.0.1:4566:4566"]
+    environment:
+      SERVICES: s3,sqs
+      DEFAULT_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    mem_limit: 768m
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - ./infra/localstack/init.sh:/etc/localstack/init/ready.d/10-init.sh:ro
+    healthcheck:
+      <<: *hc
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/init/ready | grep -q '\"completed\": true'"]
+      start_period: 20s
+    networks: [vitalstream]
+
+  # ---------------------------------------------------------------- Observability
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: vitalstream-prometheus
+    ports: ["127.0.0.1:9090:9090"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=3d
+      - --web.enable-lifecycle
+    mem_limit: 512m
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      <<: *hc
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy >/dev/null"]
+    networks: [vitalstream]
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    container_name: vitalstream-grafana
+    ports: ["127.0.0.1:3001:3000"]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    mem_limit: 384m
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      prometheus: {condition: service_healthy}
+    healthcheck:
+      <<: *hc
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health | grep -q ok"]
+      start_period: 15s
+    networks: [vitalstream]
+
+  # ---------------------------------------------------------------- n8n (profile tools)
+  n8n:
+    image: n8nio/n8n:1.64.3
+    container_name: vitalstream-n8n
+    profiles: [tools]
+    environment:
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      NODES_EXCLUDE: '["n8n-nodes-base.executeCommand","n8n-nodes-base.ssh","n8n-nodes-base.code"]'
+      N8N_PERSONALIZATION_ENABLED: "false"
+      GENERIC_TIMEZONE: UTC
+    mem_limit: 512m
+    volumes: [n8n-data:/home/node/.n8n]
+    healthcheck:
+      <<: *hc
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz | grep -q ok"]
+      start_period: 20s
+    networks: [vitalstream]
+
+  # Only published entry to n8n: basic auth in front; entrypoint fails closed if the password is empty.
+  n8n-proxy:
+    image: caddy:2.8.4-alpine
+    container_name: vitalstream-n8n-proxy
+    profiles: [tools]
+    ports: ["127.0.0.1:5678:5678"]
+    environment:
+      N8N_PROXY_USER: ${N8N_PROXY_USER:-admin}
+      N8N_PROXY_PASSWORD: ${N8N_PROXY_PASSWORD:-}
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    mem_limit: 128m
+    volumes:
+      - ./infra/n8n-proxy/entrypoint.sh:/entrypoint.sh:ro
+      - ./infra/n8n-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      n8n: {condition: service_healthy}
+    healthcheck:
+      <<: *hc
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/proxy-healthz | grep -q ok"]
+      start_period: 5s
+    networks: [vitalstream]
+
+volumes:
+  kafka-data:
+  postgres-data:
+  redis-data:
+  cassandra-data:
+  elasticsearch-data:
+  rabbitmq-data:
+  localstack-data:
+  prometheus-data:
+  grafana-data:
+  n8n-data:
+
+networks:
+  vitalstream:
+    name: vitalstream

@@ -1,0 +1,27 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Targets for services that are not running simply show as DOWN; that is expected.
+scrape_configs:
+  - job_name: ingest-gateway
+    metrics_path: /actuator/prometheus
+    static_configs: [{targets: ["ingest-gateway:8081"]}]
+
+  - job_name: clinical-api
+    metrics_path: /actuator/prometheus
+    static_configs: [{targets: ["clinical-api:8082"]}]
+
+  - job_name: copilot
+    metrics_path: /metrics
+    static_configs: [{targets: ["copilot:8083"]}]
+
+  - job_name: stream-processor
+    metrics_path: /metrics/prometheus
+    static_configs: [{targets: ["stream-processor:4040"]}]
+
+  - job_name: kafka-exporter
+    static_configs: [{targets: ["kafka-exporter:9308"]}]
+
+  - job_name: prometheus
+    static_configs: [{targets: ["localhost:9090"]}]

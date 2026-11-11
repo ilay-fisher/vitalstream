@@ -1,0 +1,15 @@
+{
+	admin off
+}
+
+:5678 {
+	handle /proxy-healthz {
+		respond "ok" 200
+	}
+	handle {
+		basicauth {
+			{env.N8N_PROXY_USER} {env.N8N_PROXY_HASH}
+		}
+		reverse_proxy n8n:5678
+	}
+}

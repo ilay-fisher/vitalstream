@@ -1,0 +1,13 @@
+{
+  "alertId": "1c8a0d4f-3b52-4a8f-8e1e-6d2b3c4d5e6f",
+  "patientId": "P-0007",
+  "type": "THRESHOLD",
+  "severity": "CRITICAL",
+  "metric": "SPO2",
+  "value": 87.5,
+  "score": null,
+  "message": "SPO2 avg 87.5 % below 90 %",
+  "windowStart": "2026-11-11T20:15:00Z",
+  "windowEnd": "2026-11-11T20:16:00Z",
+  "detectedAt": "2026-11-11T20:16:01.500Z"
+}

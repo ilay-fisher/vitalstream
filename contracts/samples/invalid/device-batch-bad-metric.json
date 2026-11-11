@@ -1,0 +1,12 @@
+{
+  "deviceId": "DEV-ICU-0001",
+  "patientId": "P-0001",
+  "readings": [
+    {
+      "eventId": "00000000-0000-0000-0000-00000000000d",
+      "metric": "GLUCOSE",
+      "value": 5.0,
+      "observedAt": "2026-11-11T20:15:30.123Z"
+    }
+  ]
+}
