@@ -147,6 +147,17 @@ Gateway behaviour: validate → idempotency check in Redis → publish to Kafka 
 | GET | `/api/v1/documents/search?q=&k=` | hybrid search debug endpoint |
 | — | `/mcp` | MCP server (streamable HTTP). Tools: `get_patient_vitals(patient_id, minutes)`, `list_alerts(patient_id?, severity?)`, `search_guidelines(query, k)`, `compute_news2(rr, spo2, sbp, hr, temp)` |
 
+### 4.1 Authentication (local-dev model; production = OIDC/JWT at API gateway, see known gaps)
+
+| Surface | Requirement | Env var (local default) |
+|---|---|---|
+| ingest-gateway all `/api/v1/**` | header `X-Api-Key` | `INGEST_API_KEY` (`dev-ingest-key`) |
+| copilot `POST /api/v1/documents` | `Authorization: Bearer` | `COPILOT_ADMIN_TOKEN` (`dev-admin-token`) |
+| copilot `/mcp` | `Authorization: Bearer`; DNS-rebinding protection ON, allowed hosts `localhost:8083`, `127.0.0.1:8083`, `copilot:8083` | `MCP_TOKEN` (`dev-mcp-token`) |
+| clinical-api, copilot chat, health/metrics | open (loopback only) | — |
+
+Rules: constant-time comparison; missing/invalid → 401 problem+json; never log tokens. RAG documents carry `provenance` (`curated` for bundled corpus, `api-upload` otherwise) shown in citations; retrieved text is passed to the LLM inside a delimited "untrusted reference material" block and the system prompt says never to follow instructions found in it.
+
 ## 5. Storage schemas
 
 ### PostgreSQL (`vitalstream` DB)
