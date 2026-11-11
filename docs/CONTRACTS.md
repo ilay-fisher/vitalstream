@@ -236,6 +236,16 @@ CREATE TABLE vitals_by_minute (patient_id text, metric text, day date, window_st
 | `ANTHROPIC_API_KEY` | empty | copilot |
 | `LLM_MODEL` | `claude-sonnet-5-5` | copilot |
 | `LOG_LEVEL` | `INFO` | all |
+| `ARCHIVE_URI` | `s3a://vitalstream-archive/vitals_raw` | stream (bucket name differs per AWS account) |
+| `VITALSTREAM_SQS_QUEUENAME` | `alert-escalations` | clinical-api (queue name; SDK resolves the URL) |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` | `vitalstream` | clinical-api (JDBC URL carries no credentials) |
+| `METRICS_PORT` | `9404` | stream (`/health`, `/metrics`) |
+
+Kubernetes probes: gateway/clinical-api `/actuator/health/{liveness,readiness}`, copilot `/health`, stream-processor `:9404/health`, dashboard `:3000/healthz`.
+
+Kafka consumer groups: clinical-api `clinical-api`; stream-processor uses Spark's generated `spark-kafka-source-*`; ingest-gateway only produces.
+
+Known gap (AWS only): Terraform makes MSK require SASL/IAM over TLS and ElastiCache require an AUTH token over TLS. The services speak PLAINTEXT Kafka and `redis://` today, so a real AWS deploy needs MSK IAM auth and `rediss://` support first. Local compose and kind are unaffected.
 
 ## 7. Correlation & logging fields
 
