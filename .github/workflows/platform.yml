@@ -1,0 +1,56 @@
+name: platform
+
+on:
+  push:
+    branches: [main]
+    paths: ["deploy/**", ".github/workflows/platform.yml"]
+  pull_request:
+    paths: ["deploy/**", ".github/workflows/platform.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+      - name: Install helm-unittest
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest --version v1.0.0
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+      - name: helm lint
+        run: |
+          helm lint deploy/helm/vitalstream
+          helm lint deploy/helm/vitalstream -f deploy/helm/vitalstream/values-kind.yaml
+      - name: helm unittest
+        run: helm unittest deploy/helm/vitalstream
+      - name: kubeconform
+        run: |
+          helm template vs deploy/helm/vitalstream --namespace vs --set ingress.enabled=true \
+            | kubeconform -strict -summary -kubernetes-version 1.30.0
+          helm template vs deploy/helm/vitalstream -f deploy/helm/vitalstream/values-kind.yaml \
+            | kubeconform -strict -summary -kubernetes-version 1.30.0
+
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+      - name: fmt
+        run: terraform fmt -check -recursive deploy/terraform
+      - name: validate and test modules
+        run: |
+          for dir in deploy/terraform/aws deploy/terraform/localstack deploy/terraform/aws/modules/*; do
+            echo "== $dir"
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+            if [ -d "$dir/tests" ]; then terraform -chdir="$dir" test; fi
+          done
