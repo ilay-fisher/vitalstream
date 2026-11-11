@@ -1,0 +1,55 @@
+server {
+  listen 3000;
+  server_name _;
+  root /usr/share/nginx/html;
+  index index.html;
+
+  add_header X-Content-Type-Options nosniff always;
+  add_header X-Frame-Options DENY always;
+  add_header Referrer-Policy no-referrer always;
+  add_header Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'" always;
+
+  # Upstreams are resolved per request (variables), so the dashboard starts even when a backend is down.
+  resolver ${DNS_RESOLVER} valid=10s;
+
+  location = /healthz {
+    access_log off;
+    default_type text/plain;
+    return 200 "ok\n";
+  }
+
+  # Same-origin API prefixes (no CORS): the SPA calls /clinical-api/* and /copilot-api/*.
+  # Streaming endpoints (SSE) must not be buffered or cut by the default read timeout.
+  location /clinical-api/ {
+    set $upstream_clinical_api_url ${CLINICAL_API_URL};
+    rewrite ^/clinical-api/(.*)$ /$1 break;
+    proxy_pass $upstream_clinical_api_url;
+    proxy_set_header Host $proxy_host;
+    proxy_set_header X-Correlation-Id $http_x_correlation_id;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_buffering off;
+    proxy_read_timeout 1h;
+  }
+
+  location /copilot-api/ {
+    set $upstream_copilot_url ${COPILOT_URL};
+    rewrite ^/copilot-api/(.*)$ /$1 break;
+    proxy_pass $upstream_copilot_url;
+    proxy_set_header Host $proxy_host;
+    proxy_set_header X-Correlation-Id $http_x_correlation_id;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_buffering off;
+    proxy_read_timeout 1h;
+  }
+
+  location /assets/ {
+    expires 1y;
+    add_header Cache-Control "public, immutable";
+  }
+
+  location / {
+    try_files $uri /index.html;
+  }
+}

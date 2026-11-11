@@ -1,0 +1,28 @@
+# Dashboard fragment (CONTRACTS 8). Paths relative to the repo root (--project-directory .).
+services:
+  dashboard:
+    build:
+      context: web/dashboard
+      dockerfile: Dockerfile
+    image: vitalstream/dashboard:local
+    container_name: dashboard
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:3000:3000'
+    environment:
+      # nginx proxies /clinical-api/ and /copilot-api/ to these (browser stays same-origin).
+      CLINICAL_API_URL: http://clinical-api:8082
+      COPILOT_URL: http://copilot:8083
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:3000/healthz']
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - vitalstream
+
+networks:
+  vitalstream:
+    name: vitalstream
+    external: false
