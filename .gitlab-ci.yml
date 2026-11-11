@@ -1,0 +1,314 @@
+# VitalStream GitLab CI: lint -> unit -> integration -> build -> e2e.
+# Same commands as the Jenkinsfile and the GitHub workflows. Each service job only runs when its
+# own paths (or the shared contracts) change; the default branch and release tags run everything.
+
+stages: [lint, unit, integration, build, e2e]
+
+default:
+  interruptible: true
+
+variables:
+  GIT_DEPTH: "20"
+  MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+  UV_CACHE_DIR: "$CI_PROJECT_DIR/.uv-cache"
+  UV_LINK_MODE: copy
+  npm_config_cache: "$CI_PROJECT_DIR/.npm"
+  # Testcontainers talks to the dind sidecar declared on the integration jobs.
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""
+  TESTCONTAINERS_HOST_OVERRIDE: docker
+
+cache:
+  key: "$CI_JOB_NAME"
+  paths: [.m2/repository, .uv-cache, .npm]
+
+# ---------------------------------------------------------------- rules per component
+.changes-ingest-gateway: &changes-ingest-gateway [services/ingest-gateway/**/*, contracts/**/*, .gitlab-ci.yml]
+.changes-clinical-api: &changes-clinical-api [services/clinical-api/**/*, contracts/**/*, .gitlab-ci.yml]
+.changes-stream-processor: &changes-stream-processor [services/stream-processor/**/*, contracts/**/*, .gitlab-ci.yml]
+.changes-copilot: &changes-copilot [services/copilot/**/*, contracts/**/*, .gitlab-ci.yml]
+.changes-simulator: &changes-simulator [tools/simulator/**/*, contracts/**/*, .gitlab-ci.yml]
+.changes-dashboard: &changes-dashboard [web/dashboard/**/*, contracts/**/*, .gitlab-ci.yml]
+.changes-e2e: &changes-e2e [e2e/**/*, infra/**/*, services/**/*, tools/**/*, web/**/*, contracts/**/*, .gitlab-ci.yml]
+
+.rules-ingest-gateway:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *changes-ingest-gateway
+.rules-clinical-api:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *changes-clinical-api
+.rules-stream-processor:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *changes-stream-processor
+.rules-copilot:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *changes-copilot
+.rules-simulator:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *changes-simulator
+.rules-dashboard:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *changes-dashboard
+.rules-e2e:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *changes-e2e
+
+# ---------------------------------------------------------------- job templates
+.java:
+  image: eclipse-temurin:21-jdk
+
+.uv:
+  image: ghcr.io/astral-sh/uv:python3.12-bookworm
+
+.node:
+  image: node:22
+
+# Docker-in-Docker sidecar for Testcontainers and image builds.
+.dind:
+  services:
+    - name: docker:27-dind
+      alias: docker
+      command: ["--tls=false"]
+
+# ---------------------------------------------------------------- lint
+lint:ingest-gateway:
+  stage: lint
+  extends: [.java, .rules-ingest-gateway]
+  script: [cd services/ingest-gateway, ./mvnw -B -q spotless:check]
+
+lint:clinical-api:
+  stage: lint
+  extends: [.java, .rules-clinical-api]
+  script: [cd services/clinical-api, ./mvnw -B -q spotless:check]
+
+lint:stream-processor:
+  stage: lint
+  extends: [.uv, .rules-stream-processor]
+  script:
+    - cd services/stream-processor
+    - uv sync --frozen
+    - uv run ruff check . && uv run ruff format --check . && uv run mypy
+
+lint:copilot:
+  stage: lint
+  extends: [.uv, .rules-copilot]
+  script:
+    - cd services/copilot
+    - uv sync --frozen
+    - uv run ruff check . && uv run ruff format --check . && uv run mypy --strict src
+
+lint:simulator:
+  stage: lint
+  extends: [.uv, .rules-simulator]
+  before_script: [apt-get update -qq && apt-get install -y -qq make]
+  script:
+    - cd tools/simulator
+    - uv sync --frozen
+    - make lint
+
+lint:dashboard:
+  stage: lint
+  extends: [.node, .rules-dashboard]
+  script:
+    - cd web/dashboard
+    - npm ci
+    - npm run typecheck
+    - npm run lint
+
+lint:e2e:
+  stage: lint
+  extends: [.uv, .rules-e2e]
+  script:
+    - cd e2e
+    - uv sync --frozen
+    - uv run ruff check . && uv run ruff format --check . && uv run mypy --strict src
+
+# ---------------------------------------------------------------- unit
+unit:ingest-gateway:
+  stage: unit
+  extends: [.java, .rules-ingest-gateway]
+  script: [cd services/ingest-gateway, ./mvnw -B test]
+  artifacts:
+    when: always
+    reports:
+      junit: services/ingest-gateway/target/surefire-reports/*.xml
+
+unit:clinical-api:
+  stage: unit
+  extends: [.java, .rules-clinical-api]
+  script: [cd services/clinical-api, ./mvnw -B test]
+  artifacts:
+    when: always
+    reports:
+      junit: services/clinical-api/target/surefire-reports/*.xml
+
+unit:stream-processor:
+  stage: unit
+  extends: [.uv, .rules-stream-processor]
+  script:
+    - cd services/stream-processor
+    - uv sync --frozen
+    - uv run pytest -m "not integration" --cov
+
+unit:copilot:
+  stage: unit
+  extends: [.uv, .rules-copilot]
+  script:
+    - cd services/copilot
+    - uv sync --frozen
+    - uv run pytest
+
+unit:simulator:
+  stage: unit
+  extends: [.uv, .rules-simulator]
+  before_script: [apt-get update -qq && apt-get install -y -qq make]
+  script:
+    - cd tools/simulator
+    - uv sync --frozen
+    - make test
+
+unit:dashboard:
+  stage: unit
+  extends: [.node, .rules-dashboard]
+  script:
+    - cd web/dashboard
+    - npm ci
+    - npm test
+
+unit:e2e:
+  stage: unit
+  extends: [.uv, .rules-e2e]
+  script:
+    - cd e2e
+    - uv sync --frozen
+    - uv run pytest
+
+# ---------------------------------------------------------------- integration (Testcontainers via dind)
+integration:ingest-gateway:
+  stage: integration
+  extends: [.java, .dind, .rules-ingest-gateway]
+  script: [cd services/ingest-gateway, ./mvnw -B verify]
+
+integration:clinical-api:
+  stage: integration
+  extends: [.java, .dind, .rules-clinical-api]
+  script: [cd services/clinical-api, ./mvnw -B verify]
+
+integration:stream-processor:
+  stage: integration
+  extends: [.uv, .dind, .rules-stream-processor]
+  script:
+    - cd services/stream-processor
+    - uv sync --frozen
+    - uv run pytest -m integration
+
+integration:copilot:
+  stage: integration
+  extends: [.uv, .dind, .rules-copilot]
+  script:
+    - cd services/copilot
+    - uv sync --frozen
+    - uv run pytest -m integration
+
+integration:simulator:
+  stage: integration
+  extends: [.uv, .dind, .rules-simulator]
+  before_script: [apt-get update -qq && apt-get install -y -qq make]
+  script:
+    - cd tools/simulator
+    - uv sync --frozen
+    - make integration
+
+integration:dashboard:
+  stage: integration
+  image: mcr.microsoft.com/playwright:v1.49.1-noble
+  extends: [.rules-dashboard]
+  script:
+    - cd web/dashboard
+    - npm ci
+    - npm run e2e
+
+# ---------------------------------------------------------------- build images
+# Pushes to the project registry on the default branch and tags; other pipelines only build.
+.build-image:
+  stage: build
+  image: docker:27
+  extends: [.dind]
+  variables:
+    COMPONENT: ""
+    CONTEXT: ""
+  script:
+    - docker build -t "$CI_REGISTRY_IMAGE/$COMPONENT:$CI_COMMIT_SHORT_SHA" "$CONTEXT"
+    - |
+      if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ] || [ -n "$CI_COMMIT_TAG" ]; then
+        echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+        docker tag "$CI_REGISTRY_IMAGE/$COMPONENT:$CI_COMMIT_SHORT_SHA" "$CI_REGISTRY_IMAGE/$COMPONENT:latest"
+        docker push "$CI_REGISTRY_IMAGE/$COMPONENT:$CI_COMMIT_SHORT_SHA"
+        docker push "$CI_REGISTRY_IMAGE/$COMPONENT:latest"
+      fi
+
+build:ingest-gateway:
+  extends: [.build-image, .rules-ingest-gateway]
+  variables: { COMPONENT: ingest-gateway, CONTEXT: services/ingest-gateway }
+
+build:stream-processor:
+  extends: [.build-image, .rules-stream-processor]
+  variables: { COMPONENT: stream-processor, CONTEXT: services/stream-processor }
+
+build:clinical-api:
+  extends: [.build-image, .rules-clinical-api]
+  variables: { COMPONENT: clinical-api, CONTEXT: services/clinical-api }
+
+build:copilot:
+  extends: [.build-image, .rules-copilot]
+  variables: { COMPONENT: copilot, CONTEXT: services/copilot }
+
+build:simulator:
+  extends: [.build-image, .rules-simulator]
+  variables: { COMPONENT: simulator, CONTEXT: tools/simulator }
+
+build:dashboard:
+  extends: [.build-image, .rules-dashboard]
+  variables: { COMPONENT: dashboard, CONTEXT: web/dashboard }
+
+# ---------------------------------------------------------------- e2e
+# The suite reaches the stack on loopback ports, so it needs a runner that shares the Docker
+# daemon's network namespace: a shell executor tagged `docker-e2e` with Docker, make and uv.
+e2e:compose:
+  stage: e2e
+  extends: [.rules-e2e]
+  tags: [docker-e2e]
+  needs:
+    - job: build:ingest-gateway
+      optional: true
+    - job: build:stream-processor
+      optional: true
+    - job: build:clinical-api
+      optional: true
+    - job: build:copilot
+      optional: true
+    - job: build:dashboard
+      optional: true
+  variables:
+    DOCKER_HOST: ""
+    E2E_TEARDOWN: all
+  script:
+    - cd e2e
+    - uv sync --frozen
+    - uv run pytest -m e2e -o addopts="" -v -s
+  after_script:
+    - make down || true
