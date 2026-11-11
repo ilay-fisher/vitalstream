@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VitalStream Workflow</title>
+<style>
+  :root { --bg:#f7f8fa; --card:#fff; --ink:#1b1f24; --muted:#5b6470; --line:#d8dde3; --accent:#0b6bcb; --ok:#1a7f37; --wip:#b35900; --todo:#6e7781; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#0f1216; --card:#171b21; --ink:#e6e9ee; --muted:#9aa4b1; --line:#2a313a; --accent:#4ea1ff; --ok:#3fb950; --wip:#f0883e; --todo:#8b949e; } }
+  * { box-sizing:border-box }
+  body { margin:0; font:15px/1.5 -apple-system, system-ui, Segoe UI, sans-serif; background:var(--bg); color:var(--ink); }
+  main { max-width:1100px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { margin:0 0 4px; font-size:28px } h2 { margin:40px 0 12px; font-size:20px }
+  p.lead { color:var(--muted); margin:0 0 24px }
+  .flow { display:flex; flex-wrap:wrap; gap:8px; align-items:center }
+  .step { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 14px; font-weight:600 }
+  .arrow { color:var(--muted) }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:12px }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px }
+  .card h3 { margin:0 0 6px; font-size:16px } .card code { font-size:12px; color:var(--muted) }
+  .card ul { margin:8px 0 0; padding-left:18px; color:var(--muted); font-size:14px }
+  .pill { display:inline-block; font-size:12px; font-weight:700; padding:2px 8px; border-radius:999px; border:1px solid currentColor }
+  .todo { color:var(--todo) } .wip { color:var(--wip) } .done { color:var(--ok) }
+  .phase { border-left:3px solid var(--accent); padding-left:12px; margin:16px 0 }
+  table { border-collapse:collapse; width:100%; background:var(--card); font-size:14px }
+  th,td { border:1px solid var(--line); padding:8px; text-align:left; vertical-align:top }
+</style>
+</head>
+<body>
+<main>
+<h1>VitalStream build workflow</h1>
+<p class="lead">How the manager agent and worker agents build this repository. Status pills are updated by the manager on every merge.</p>
+
+<h2>Loop per workstream</h2>
+<div class="flow">
+  <div class="step">Manager writes contract + task</div><span class="arrow">→</span>
+  <div class="step">Worker branches</div><span class="arrow">→</span>
+  <div class="step">Failing test</div><span class="arrow">→</span>
+  <div class="step">Code to green</div><span class="arrow">→</span>
+  <div class="step">Refactor, docs, logs</div><span class="arrow">→</span>
+  <div class="step">Run for real</div><span class="arrow">→</span>
+  <div class="step">PR + CI</div><span class="arrow">→</span>
+  <div class="step">Manager review</div><span class="arrow">→</span>
+  <div class="step">Merge or send back</div>
+</div>
+
+<h2>Phases</h2>
+<div class="phase"><strong>Phase 0 – Manager.</strong> Tooling (Java 21, Maven, kubectl, kind, Helm, Terraform, Colima 6 CPU / 16 GB), repo, README, CONTRIBUTING, CONTRACTS, this board.</div>
+<div class="phase"><strong>Wave 1 – parallel.</strong> Foundation, ingest-gateway, stream-processor, clinical-api, copilot. Each codes against CONTRACTS.md and tests with Testcontainers, so none waits on another.</div>
+<div class="phase"><strong>Wave 2 – parallel.</strong> Simulator + dashboard (needs live APIs for visual checks), Kubernetes + Helm + Terraform, CI/CD + end-to-end + n8n.</div>
+<div class="phase"><strong>Wave 3 – Manager.</strong> Full-stack run, screenshots into <code>docs/images/</code>, architecture &amp; interview guide.</div>
+
+<h2>Workstreams</h2>
+<div class="grid" id="ws">
+  <div class="card"><h3>foundation <span class="pill todo">todo</span></h3><code>infra/ contracts/ Makefile .github/workflows/foundation.yml</code>
+    <ul><li>Compose: Kafka KRaft, Postgres+pgvector, Redis, Cassandra, Elasticsearch, RabbitMQ, LocalStack, Prometheus, Grafana, Kafka UI, Kibana, n8n</li><li>Init: topics, schemas, keyspace, indices, queues, bucket</li><li>JSON Schemas + samples</li></ul></div>
+  <div class="card"><h3>ingest-gateway <span class="pill todo">todo</span></h3><code>services/ingest-gateway/</code>
+    <ul><li>Spring Boot, HAPI FHIR + HL7v2</li><li>Redis idempotency + token-bucket rate limit</li><li>Idempotent Kafka producer</li></ul></div>
+  <div class="card"><h3>stream-processor <span class="pill todo">todo</span></h3><code>services/stream-processor/</code>
+    <ul><li>Spark Structured Streaming, watermark windows</li><li>Threshold, EWMA z-score, NEWS2, KMeans anomaly</li><li>Cassandra, Redis, S3 Parquet, alerts topic</li></ul></div>
+  <div class="card"><h3>clinical-api <span class="pill todo">todo</span></h3><code>services/clinical-api/</code>
+    <ul><li>Kafka consumer, retry + DLQ, dedupe</li><li>Postgres + transactional outbox → RabbitMQ, SQS</li><li>Elasticsearch search, Cassandra reads, Redis cache, SSE</li></ul></div>
+  <div class="card"><h3>copilot <span class="pill todo">todo</span></h3><code>services/copilot/</code>
+    <ul><li>FastAPI, pgvector + BM25 hybrid search (RRF)</li><li>Agent with tools, pluggable LLM (fake / Claude)</li><li>MCP server</li></ul></div>
+  <div class="card"><h3>simulator + dashboard <span class="pill todo">todo</span></h3><code>tools/simulator/ web/dashboard/</code>
+    <ul><li>Synthetic patients, deterioration scenarios, load mode</li><li>React live vitals, alert feed, copilot chat</li><li>Playwright screenshots</li></ul></div>
+  <div class="card"><h3>platform <span class="pill todo">todo</span></h3><code>deploy/</code>
+    <ul><li>Helm chart, kind cluster, HPA, probes</li><li>Terraform AWS (EKS, RDS, MSK, ElastiCache, SQS, S3, ECR) – validate only</li></ul></div>
+  <div class="card"><h3>delivery <span class="pill todo">todo</span></h3><code>.github/workflows/ci.yml e2e/ Jenkinsfile infra/n8n/</code>
+    <ul><li>Image build + push to GHCR</li><li>Compose end-to-end test</li><li>n8n escalation workflow</li></ul></div>
+</div>
+
+<h2>Review checklist (manager)</h2>
+<table>
+<tr><th>Check</th><th>How</th></tr>
+<tr><td>Scope</td><td>Diff touches only owned paths</td></tr>
+<tr><td>TDD</td><td>Tests exist for every behaviour; commit order; coverage ≥ 80 %</td></tr>
+<tr><td>Contract</td><td>Topics, schemas, ports, env vars match CONTRACTS.md</td></tr>
+<tr><td>Logging</td><td>JSON, correlationId, right levels, no PHI bulk logging</td></tr>
+<tr><td>Docs</td><td>Component README, doc comments, OpenAPI</td></tr>
+<tr><td>CI</td><td><code>gh pr checks</code> green</td></tr>
+<tr><td>Real run</td><td>Evidence of running against compose infra / screenshots</td></tr>
+</table>
+</main>
+</body>
+</html>
