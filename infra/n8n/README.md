@@ -2,8 +2,6 @@
 
 Importable workflow that escalates CRITICAL alerts nobody has acknowledged.
 
-![canvas](../../docs/images/n8n-escalation.png)
-
 ```mermaid
 flowchart LR
     Q[RabbitMQ trigger<br/>queue notify.critical] --> F{severity = CRITICAL}
@@ -52,4 +50,26 @@ The workflow imports inactive. Activate it in the UI (toggle top right) or with 
 
 ## Verification
 
-`make infra-up PROFILES=tools` then the import above printed `Successfully imported 1 workflow.` and `n8n list:workflow` listed `vs-critical-alert-escalation|critical-alert-escalation`. The canvas screenshot above was taken from that instance with Playwright.
+Against the `n8nio/n8n:1.64.3` container from `infra/compose.yaml` (profile `tools`):
+
+```
+$ docker exec vitalstream-n8n n8n import:credentials --input=/tmp/rabbitmq.dev.json
+Successfully imported 1 credential.
+$ docker exec vitalstream-n8n n8n import:workflow --input=/tmp/critical-alert-escalation.json
+Successfully imported 1 workflow.
+$ docker exec vitalstream-n8n n8n list:workflow
+vs-critical-alert-escalation|critical-alert-escalation
+```
+
+`e2e/tests/unit/test_delivery_files.py` additionally checks that no excluded node type is used and that every connection points at an existing node.
+
+### Canvas screenshot (`docs/images/n8n-escalation.png`)
+
+Not captured yet. n8n 1.x only renders the editor (and its `/workflows/demo` view) after the owner account exists, and creating that account is a manual step: open `http://127.0.0.1:5678` (Caddy basic auth, then the owner form), open the imported workflow, and capture it, for example with Playwright:
+
+```js
+await page.goto('http://127.0.0.1:5678/workflow/vs-critical-alert-escalation');
+await page.screenshot({ path: 'docs/images/n8n-escalation.png' });
+```
+
+Note for local Colima setups: the n8n healthcheck in `infra/compose.yaml` calls `localhost`, which can resolve to `::1` while n8n listens on IPv4 only, so the container shows `unhealthy` (and `n8n-proxy`, which waits for it, does not start) even though `http://127.0.0.1:5678/healthz` answers `ok`.

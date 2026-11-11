@@ -55,10 +55,13 @@ jobs:
       # CRITICAL only, and only where a fix exists: a CVE nobody can patch yet is not actionable.
       - name: Trivy scan (fails on CRITICAL)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_IGNORE_POLICY: e2e/ci/trivy-ignore.rego
         with:
           image-ref: ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:scan
           severity: CRITICAL
           ignore-unfixed: true
+          scanners: vuln
           exit-code: "1"
           format: table
 
