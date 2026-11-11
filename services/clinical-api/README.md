@@ -64,6 +64,51 @@ curl -N -H 'Accept: text/event-stream' localhost:8082/api/v1/alerts/stream   # l
 
 Every request accepts and returns `X-Correlation-Id`.
 
+## Response shapes
+
+Timestamps are ISO-8601 UTC strings, enum values upper case, `null` fields are always present in
+`AlertView` and omitted in vital points. There is no separate `/search` endpoint: full-text search
+is `GET /api/v1/alerts?q=...`, and acknowledgement is `POST` (CONTRACTS section 4), not PATCH.
+
+`GET /api/v1/patients` returns a bare array; `GET /api/v1/patients/{id}` returns one element:
+
+```json
+[{"id":"P-0001","name":"Dana Levi","bed":"ICU-01","ward":"ICU",
+  "latestVitals":{"HEART_RATE":{"value":97.0,"unit":"/min","observedAt":"2026-11-11T20:15:30.123Z"}},
+  "openAlerts":2}]
+```
+
+`GET /api/v1/patients/{id}/vitals?metric=&from=&to=&resolution=raw|minute` (defaults: last hour, all metrics, raw; max range 7 days, max 5000 points, ascending by time):
+
+```json
+{"patientId":"P-0001","resolution":"RAW","from":"2026-11-11T20:00:00Z","to":"2026-11-11T21:00:00Z",
+ "points":[{"timestamp":"2026-11-11T20:15:30Z","metric":"HEART_RATE","value":101.0,"unit":"/min","deviceId":"DEV-ICU-0001"}]}
+```
+
+With `resolution=minute` the response has `"resolution":"MINUTE"` and points are
+`{"timestamp":"<window start>","metric":"HEART_RATE","min":98.0,"max":104.0,"avg":101.0,"count":12}`.
+
+`GET /api/v1/alerts?patientId=&severity=&status=&q=&page=0&size=20` (size 1..100, newest first):
+
+```json
+{"items":[<AlertView>],"page":0,"size":20,"totalElements":31,"totalPages":2}
+```
+
+`GET /api/v1/alerts/{id}` and `POST /api/v1/alerts/{id}/ack` (body `{"by":"dr.cohen","note":"..."}`, `by` required) return an `AlertView`:
+
+```json
+{"alertId":"0b7f9c3e-2a41-4f7e-9d0d-5c1a2b3c4d5e","patientId":"P-0001","type":"NEWS2","severity":"HIGH",
+ "metric":null,"value":null,"score":7.0,"message":"NEWS2 score 7 (RR 25, SpO2 91, HR 131)",
+ "windowStart":"2026-11-11T20:15:00Z","windowEnd":"2026-11-11T20:16:00Z","detectedAt":"2026-11-11T20:16:02.010Z",
+ "status":"ACKNOWLEDGED","acknowledgedBy":"dr.cohen","acknowledgedAt":"2026-11-11T20:20:00Z",
+ "acknowledgementNote":"at bedside","version":1}
+```
+
+SSE events (`event: alert`, `id: <alertId>:<version>`) carry the same `AlertView` as `data`.
+
+Errors (`application/problem+json`): `{"type":"about:blank","title":"Resource not found","status":404,"detail":"Alert ... not found","instance":"/api/v1/alerts/...","correlationId":"..."}`;
+404 unknown alert/patient, 400 invalid parameter or Host, 409 already acknowledged or concurrent change, 503 backing store down.
+
 ## Alert flow
 
 ```mermaid
