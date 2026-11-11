@@ -58,7 +58,7 @@
     <ul><li>Spring Boot, HAPI FHIR + HL7v2</li><li>Redis idempotency + token-bucket rate limit</li><li>Idempotent Kafka producer</li></ul></div>
   <div class="card"><h3>stream-processor <span class="pill done">merged</span></h3><code>services/stream-processor/</code>
     <ul><li>Spark Structured Streaming, watermark windows</li><li>Threshold, EWMA z-score, NEWS2, KMeans anomaly</li><li>Cassandra, Redis, S3 Parquet, alerts topic</li></ul></div>
-  <div class="card"><h3>clinical-api <span class="pill wip">in progress</span></h3><code>services/clinical-api/</code>
+  <div class="card"><h3>clinical-api <span class="pill done">merged</span></h3><code>services/clinical-api/</code>
     <ul><li>Kafka consumer, retry + DLQ, dedupe</li><li>Postgres + transactional outbox → RabbitMQ, SQS</li><li>Elasticsearch search, Cassandra reads, Redis cache, SSE</li></ul></div>
   <div class="card"><h3>copilot <span class="pill done">merged</span></h3><code>services/copilot/</code>
     <ul><li>FastAPI, pgvector + BM25 hybrid search (RRF)</li><li>Agent with tools, pluggable LLM (fake / Claude)</li><li>MCP server</li></ul></div>
