@@ -1,0 +1,39 @@
+services:
+  stream-processor:
+    build:
+      context: .
+    image: vitalstream/stream-processor:latest
+    container_name: stream-processor
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      cassandra:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      REDIS_URL: redis://redis:6379
+      CASSANDRA_CONTACT_POINTS: cassandra:9042
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_ENV: ${APP_ENV:-dev}
+      LOG_PSEUDONYM_KEY: ${LOG_PSEUDONYM_KEY:-dev-only-pseudonym-key}
+    ports:
+      - "127.0.0.1:4040:4040"
+    volumes:
+      - stream-processor-data:/data
+    restart: unless-stopped
+
+volumes:
+  stream-processor-data:
+
+networks:
+  default:
+    name: vitalstream
+    external: false
