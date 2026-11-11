@@ -1,0 +1,48 @@
+name: foundation
+
+on:
+  push:
+    branches: [main]
+    paths: ["infra/**", "contracts/**", "Makefile", "scripts/**", ".github/workflows/foundation.yml"]
+  pull_request:
+    paths: ["infra/**", "contracts/**", "Makefile", "scripts/**", ".github/workflows/foundation.yml"]
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Lint
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: Schema and sample tests
+        run: uv run pytest -q
+
+  compose-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose file (all profiles)
+        run: docker compose --project-directory . -f infra/compose.yaml --profile tools config -q
+      - name: Shell syntax
+        run: bash -n scripts/health.sh infra/kafka/init-topics.sh infra/localstack/init.sh && sh -n infra/elasticsearch/init.sh
+
+  infra-smoke:
+    runs-on: ubuntu-latest
+    needs: [contracts, compose-config]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start infrastructure
+        run: make infra-up
+      - name: Health
+        run: make health
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose --project-directory . -f infra/compose.yaml ps -a && docker compose --project-directory . -f infra/compose.yaml logs --tail=80
+      - name: Stop infrastructure
+        if: always()
+        run: make clean
