@@ -38,6 +38,7 @@ Tests (Docker needed for integration tests, see CONTRIBUTING section 7 for the C
 | `RABBITMQ_URL` | `amqp://vitalstream:vitalstream@localhost:5672` | exchange `alerts.notify` |
 | `AWS_ENDPOINT_URL` / `AWS_REGION` | `` / `us-east-1` | SQS queue `alert-escalations` (endpoint set means LocalStack, dummy credentials) |
 | `LOG_LEVEL` | `INFO` | root log level |
+| `ALLOWED_HOSTS` | `localhost,127.0.0.1,clinical-api` | `Host` header allowlist (DNS-rebinding defence); bare names also match with the serving port, others get 400 problem+json |
 | `APP_ENV` | `dev` | anything else enables the secret guard: startup fails if `LOG_PSEUDONYM_KEY`, the Postgres or RabbitMQ password is empty, a dev default or shorter than 32 chars (dev logs one WARN) |
 | `LOG_PSEUDONYM_KEY` | `dev-only-pseudonym-key` | HMAC key for `patientRef` in logs (override outside local dev) |
 | `vitalstream.outbox.batch-size`, `vitalstream.outbox.interval-ms` | `50`, `500` | relay tuning (Spring properties) |

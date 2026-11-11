@@ -45,6 +45,7 @@ spring:
       enabled: true
 
 vitalstream:
+  allowed-hosts: ${ALLOWED_HOSTS:localhost,127.0.0.1,clinical-api}
   elasticsearch:
     url: ${ELASTICSEARCH_URL:http://localhost:9200}
   cassandra:

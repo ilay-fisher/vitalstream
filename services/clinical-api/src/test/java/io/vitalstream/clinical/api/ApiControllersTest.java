@@ -281,4 +281,11 @@ class ApiControllersTest {
         .andExpect(status().isInternalServerError())
         .andExpect(jsonPath("$.detail").value("Unexpected server error"));
   }
+
+  @Test
+  void foreignHostHeaderIsRejectedBeforeReachingControllers() throws Exception {
+    mvc.perform(get("/api/v1/patients").header("Host", "evil.example.com"))
+        .andExpect(status().isBadRequest())
+        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+  }
 }
