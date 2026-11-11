@@ -1,0 +1,49 @@
+name: clinical-api
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/clinical-api/**"
+      - ".github/workflows/clinical-api.yml"
+  pull_request:
+    paths:
+      - "services/clinical-api/**"
+      - ".github/workflows/clinical-api.yml"
+
+defaults:
+  run:
+    working-directory: services/clinical-api
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Spotless (google-java-format)
+        run: ./mvnw -B -q spotless:check
+      - name: Unit + integration tests with JaCoCo gate (>= 80 % lines)
+        run: ./mvnw -B verify
+      - name: Upload JaCoCo report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: services/clinical-api/target/site/jacoco
+          if-no-files-found: warn
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            services/clinical-api/target/surefire-reports
+            services/clinical-api/target/failsafe-reports
+      - name: Docker build
+        run: docker build -t vitalstream/clinical-api:ci .
