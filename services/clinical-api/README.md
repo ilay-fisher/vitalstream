@@ -10,6 +10,8 @@ RabbitMQ, SQS, Elasticsearch, Cassandra adapters and Spring config).
 
 ## Run
 
+Real-run evidence against live containers: [docs/real-run.md](docs/real-run.md).
+
 ```bash
 export PATH=/opt/homebrew/opt/openjdk@21/bin:$PATH JAVA_HOME=/opt/homebrew/opt/openjdk@21
 make infra-up                          # from repo root (defaults work against infra/ on localhost)
