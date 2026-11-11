@@ -1,0 +1,49 @@
+# Fragment merged with infra/compose.yaml (see CONTRACTS section 8); paths are relative to the repo root.
+services:
+  clinical-api:
+    build:
+      context: services/clinical-api
+    image: vitalstream/clinical-api:local
+    container_name: clinical-api
+    ports:
+      - "127.0.0.1:8082:8082"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      REDIS_URL: redis://redis:6379
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/vitalstream
+      POSTGRES_USER: ${POSTGRES_USER:-vitalstream}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vitalstream}
+      CASSANDRA_CONTACT_POINTS: cassandra:9042
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-vitalstream}:${RABBITMQ_PASSWORD:-vitalstream}@rabbitmq:5672
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      cassandra:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8082/actuator/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 40s
+    networks:
+      - vitalstream
+
+networks:
+  vitalstream:
+    name: vitalstream
+    external: false
