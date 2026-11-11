@@ -3,7 +3,6 @@ package io.vitalstream.ingest.infrastructure;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-import io.vitalstream.ingest.domain.model.Metric;
 import io.vitalstream.ingest.domain.model.RejectionReason;
 import io.vitalstream.ingest.domain.model.Source;
 import io.vitalstream.ingest.infrastructure.metrics.MicrometerIngestMetrics;
@@ -15,24 +14,17 @@ class MicrometerIngestMetricsTest {
   private final MicrometerIngestMetrics metrics = new MicrometerIngestMetrics(registry);
 
   @Test
-  void countsIngestedPerSourceAndMetric() {
-    metrics.ingested(Source.FHIR, Metric.SPO2);
-    metrics.ingested(Source.FHIR, Metric.SPO2);
-    metrics.ingested(Source.HL7V2, Metric.SPO2);
+  void countsIngestedPerContractSourceLabel() {
+    metrics.ingested(Source.FHIR);
+    metrics.ingested(Source.FHIR);
+    metrics.ingested(Source.HL7V2);
+    metrics.ingested(Source.DEVICE_BATCH);
 
-    assertThat(
-            registry
-                .get("vitals.ingested")
-                .tags("source", "FHIR", "metric", "SPO2")
-                .counter()
-                .count())
+    assertThat(registry.get("vitalstream.events.ingested").tag("source", "fhir").counter().count())
         .isEqualTo(2.0);
-    assertThat(
-            registry
-                .get("vitals.ingested")
-                .tags("source", "HL7V2", "metric", "SPO2")
-                .counter()
-                .count())
+    assertThat(registry.get("vitalstream.events.ingested").tag("source", "hl7").counter().count())
+        .isEqualTo(1.0);
+    assertThat(registry.get("vitalstream.events.ingested").tag("source", "batch").counter().count())
         .isEqualTo(1.0);
   }
 
@@ -40,7 +32,12 @@ class MicrometerIngestMetricsTest {
   void countsRejectionsByReason() {
     metrics.rejected(RejectionReason.OUT_OF_RANGE);
 
-    assertThat(registry.get("vitals.rejected").tag("reason", "OUT_OF_RANGE").counter().count())
+    assertThat(
+            registry
+                .get("vitalstream.events.rejected")
+                .tag("reason", "OUT_OF_RANGE")
+                .counter()
+                .count())
         .isEqualTo(1.0);
   }
 

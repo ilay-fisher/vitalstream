@@ -257,10 +257,46 @@ class IngestGatewayE2EIT {
     assertThat(get("/v3/api-docs").body()).contains("/api/v1/vitals/batch", "/api/v1/hl7");
     assertThat(get("/swagger-ui/index.html").statusCode()).isEqualTo(200);
 
+    assertThat(get("/actuator/prometheus").body()).contains("vitals_kafka_publish_seconds");
+  }
+
+  @Test
+  void prometheusExposesContractMetricNamesAfterEachInboundFormat() throws Exception {
+    String dev = device();
+    post(
+        "/api/v1/vitals/batch",
+        "application/json",
+        batchBody(
+            dev,
+            UUID.randomUUID().toString(),
+            UUID.randomUUID().toString(),
+            UUID.randomUUID().toString()));
+    post(
+        "/api/v1/fhir/Observation",
+        "application/fhir+json",
+        Fixtures.read("fhir-observation-hr.json")
+            .replace("6f1c2a1e-8d0b-4c11-9a77-3f0c2b9e1d10", UUID.randomUUID().toString())
+            .replace("DEV-ICU-0001", dev)
+            .replace("2026-11-11T20:15:30.123Z", Instant.now().toString()));
+    String now = HL7_TS.format(Instant.now());
+    post(
+        "/api/v1/hl7",
+        "text/plain",
+        Fixtures.read("hl7-oru-r01.hl7")
+            .replace("20261111201530.123+0000", now)
+            .replace("20261111201530+0000", now)
+            .replace("MSG-0001", "MSG-" + UUID.randomUUID())
+            .replace("DEV-ICU-0001", dev));
+
     String prometheus = get("/actuator/prometheus").body();
+
     assertThat(prometheus)
-        .contains("vitals_ingested_total")
-        .contains("vitals_kafka_publish_seconds");
+        .contains("vitalstream_events_ingested_total{")
+        .contains("source=\"batch\"")
+        .contains("source=\"fhir\"")
+        .contains("source=\"hl7\"")
+        .contains("vitalstream_events_rejected_total{")
+        .contains("reason=\"OUT_OF_RANGE\"");
   }
 
   private static String header(ConsumerRecord<?, ?> record, String name) {

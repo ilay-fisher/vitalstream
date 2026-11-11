@@ -76,7 +76,7 @@ Format mapping notes:
 
 ## Metrics
 
-`vitals_ingested_total{source,metric}`, `vitals_rejected_total{reason}`, `vitals_duplicates_total`, `vitals_kafka_publish_seconds{outcome}` (timer/histogram), plus the standard JVM/HTTP metrics.
+`vitalstream_events_ingested_total{source=batch|fhir|hl7}`, `vitalstream_events_rejected_total{reason}` (names pinned by CONTRACTS section 7 for the Grafana dashboard), `vitals_duplicates_total`, `vitals_kafka_publish_seconds{outcome}` (timer/histogram), plus the standard JVM/HTTP metrics.
 
 ## Design decisions
 
