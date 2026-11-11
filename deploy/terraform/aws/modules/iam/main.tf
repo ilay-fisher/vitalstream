@@ -7,40 +7,33 @@ locals {
   }
 }
 
-data "aws_iam_policy_document" "trust" {
-  for_each = local.accounts
-
-  statement {
-    actions = ["sts:AssumeRoleWithWebIdentity"]
-
-    principals {
-      type        = "Federated"
-      identifiers = [var.oidc_provider_arn]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "${var.oidc_provider_url}:sub"
-      values   = ["system:serviceaccount:${var.namespace}:${each.value}"]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "${var.oidc_provider_url}:aud"
-      values   = ["sts.amazonaws.com"]
-    }
-  }
+# jsonencode (not a policy-document data source) keeps the trust policy known at plan time.
+locals {
+  trust = { for name in keys(local.accounts) : name => jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Action    = "sts:AssumeRoleWithWebIdentity"
+      Principal = { Federated = var.oidc_provider_arn }
+      Condition = {
+        StringEquals = {
+          "${var.oidc_provider_url}:sub" = "system:serviceaccount:${var.namespace}:${local.accounts[name]}"
+          "${var.oidc_provider_url}:aud" = "sts.amazonaws.com"
+        }
+      }
+    }]
+  }) }
 }
 
 resource "aws_iam_role" "clinical_api" {
   name               = "${var.name_prefix}-clinical-api"
-  assume_role_policy = data.aws_iam_policy_document.trust["clinical-api"].json
+  assume_role_policy = local.trust["clinical-api"]
   tags               = var.tags
 }
 
 resource "aws_iam_role" "stream_processor" {
   name               = "${var.name_prefix}-stream-processor"
-  assume_role_policy = data.aws_iam_policy_document.trust["stream-processor"].json
+  assume_role_policy = local.trust["stream-processor"]
   tags               = var.tags
 }
 
