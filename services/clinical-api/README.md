@@ -164,6 +164,7 @@ sequenceDiagram
   subscribes and writes to its own SSE connections. The live feed is best effort (a Redis outage does
   not fail ingestion; clients can reload from `/api/v1/alerts`).
 - **Optimistic locking on ack.** `UPDATE ... WHERE id=? AND version=?`; a lost race returns 409.
+- **DLQ headers.** Records on `alerts.detected.dlq` keep the original key, value bytes and headers (`correlationId`, ...) and add `originalTopic` and `error` (`"<ExceptionSimpleName>: <message>"` of the listener failure, max 500 chars; poison records show `PoisonMessageException: ...`), plus Spring's standard `kafka_dlt-*` headers.
 - **Errors.** `DefaultErrorHandler` with exponential backoff (3 retries) then
   `DeadLetterPublishingRecoverer`; non-retryable poison records are dead-lettered immediately with
   the original bytes. Offsets are committed manually after the transaction.
