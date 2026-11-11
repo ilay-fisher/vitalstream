@@ -57,6 +57,11 @@ secrets:
 
 networkPolicy:
   enabled: true
+  # Pod and Service CIDRs of the cluster. Added to the `except` list of every internet egress rule
+  # so "internet" never means "the cluster". Always also excluded: RFC1918, link-local (cloud
+  # metadata), CGNAT and loopback.
+  clusterCIDRs: []
+  internetExceptCIDRs: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, 127.0.0.0/8]
   # Namespace of the ingress controller allowed to reach services that opt in.
   ingressControllerNamespaceSelector:
     kubernetes.io/metadata.name: ingress-nginx
@@ -121,7 +126,8 @@ services:
       egressToServices: []
       # Kafka plaintext, Kafka TLS (MSK), Redis.
       infraPorts: [9092, 9094, 6379]
-      internetPorts: []
+      egress:
+        internet: {enabled: false, ports: [443], cidrs: [0.0.0.0/0]}
 
   stream-processor:
     enabled: true
@@ -160,8 +166,9 @@ services:
       egressToServices: []
       # Kafka plaintext/TLS, Redis, Cassandra.
       infraPorts: [9092, 9094, 6379, 9042]
-      # S3.
-      internetPorts: [443]
+      # S3. Prefer a VPC gateway endpoint and disable this (see deploy/README.md).
+      egress:
+        internet: {enabled: true, ports: [443], cidrs: [0.0.0.0/0]}
 
   clinical-api:
     enabled: true
@@ -204,8 +211,9 @@ services:
       egressToServices: []
       # Kafka, Redis, Postgres, Cassandra, Elasticsearch, RabbitMQ.
       infraPorts: [9092, 9094, 6379, 5432, 9042, 9200, 5672]
-      # SQS.
-      internetPorts: [443]
+      # SQS. Prefer a VPC interface endpoint and disable this (see deploy/README.md).
+      egress:
+        internet: {enabled: true, ports: [443], cidrs: [0.0.0.0/0]}
 
   copilot:
     enabled: true
@@ -242,8 +250,10 @@ services:
       egressToServices: [clinical-api]
       # Postgres, Elasticsearch.
       infraPorts: [5432, 9200]
-      # Anthropic API (only used with LLM_PROVIDER=anthropic).
-      internetPorts: [443]
+      # Anthropic API. Enable ONLY with LLM_PROVIDER=anthropic and prefer an egress proxy / FQDN
+      # policy (deploy/README.md): copilot executes tool calls driven by model output.
+      egress:
+        internet: {enabled: false, ports: [443], cidrs: [0.0.0.0/0]}
 
   dashboard:
     enabled: true
@@ -277,7 +287,8 @@ services:
       allowMonitoring: false
       egressToServices: []
       infraPorts: []
-      internetPorts: []
+      egress:
+        internet: {enabled: false, ports: [443], cidrs: [0.0.0.0/0]}
 
 # Pod-level knobs shared by all services.
 podAnnotations: {}

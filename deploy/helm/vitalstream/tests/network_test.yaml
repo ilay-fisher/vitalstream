@@ -41,8 +41,24 @@ tests:
       - equal:
           path: spec.ingress[0].ports[0].port
           value: 8082
-  - it: copilot may reach the internet on 443 for the LLM
+  - it: copilot has no internet egress unless enabled for the anthropic provider
     template: networkpolicy.yaml
+    documentSelector:
+      path: metadata.name
+      value: copilot
+    asserts:
+      - notContains:
+          path: spec.egress
+          content:
+            ports:
+              - port: 443
+                protocol: TCP
+          any: true
+  - it: internet egress excludes private, link-local, CGNAT, loopback and cluster CIDRs
+    template: networkpolicy.yaml
+    set:
+      services.copilot.networkPolicy.egress.internet.enabled: true
+      networkPolicy.clusterCIDRs: [10.244.0.0/16, 10.96.0.0/12]
     documentSelector:
       path: metadata.name
       value: copilot
@@ -53,9 +69,48 @@ tests:
             to:
               - ipBlock:
                   cidr: 0.0.0.0/0
+                  except:
+                    - 10.0.0.0/8
+                    - 172.16.0.0/12
+                    - 192.168.0.0/16
+                    - 169.254.0.0/16
+                    - 100.64.0.0/10
+                    - 127.0.0.0/8
+                    - 10.244.0.0/16
+                    - 10.96.0.0/12
             ports:
               - port: 443
                 protocol: TCP
+  - it: internet CIDRs are configurable per service
+    template: networkpolicy.yaml
+    set:
+      services.clinical-api.networkPolicy.egress.internet.cidrs: [52.94.0.0/16]
+    documentSelector:
+      path: metadata.name
+      value: clinical-api
+    asserts:
+      - contains:
+          path: spec.egress
+          content:
+            to:
+              - ipBlock:
+                  cidr: 52.94.0.0/16
+            ports:
+              - port: 443
+                protocol: TCP
+  - it: gateway and dashboard have no internet egress
+    template: networkpolicy.yaml
+    documentSelector:
+      path: metadata.name
+      value: ingest-gateway
+    asserts:
+      - notContains:
+          path: spec.egress
+          content:
+            to:
+              - ipBlock:
+                  cidr: 0.0.0.0/0
+          any: true
   - it: infra egress is limited to the infra namespace on listed ports
     template: networkpolicy.yaml
     documentSelector:

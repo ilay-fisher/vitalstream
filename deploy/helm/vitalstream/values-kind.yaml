@@ -42,3 +42,7 @@ services:
     autoscaling: {enabled: false}
   dashboard:
     enabled: false
+
+# Pod (10.244.0.0/16) and Service (10.96.0.0/16) CIDRs of the kind default cluster.
+networkPolicy:
+  clusterCIDRs: [10.244.0.0/16, 10.96.0.0/16]
