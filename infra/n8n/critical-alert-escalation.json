@@ -1,0 +1,323 @@
+[
+  {
+    "id": "vs-critical-alert-escalation",
+    "name": "critical-alert-escalation",
+    "active": false,
+    "nodes": [
+      {
+        "parameters": {
+          "queue": "notify.critical",
+          "options": {
+            "acknowledge": "executionFinishes",
+            "jsonParseBody": true,
+            "onlyContent": true,
+            "parallelMessages": 1
+          }
+        },
+        "id": "a1f0c001-0000-4000-8000-000000000001",
+        "name": "Critical alert queue",
+        "type": "n8n-nodes-base.rabbitmqTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          300
+        ],
+        "credentials": {
+          "rabbitmq": {
+            "id": "vs-rabbitmq",
+            "name": "VitalStream RabbitMQ"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "conditions": [
+              {
+                "id": "sev-critical",
+                "leftValue": "={{ $json.severity }}",
+                "rightValue": "CRITICAL",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "a1f0c001-0000-4000-8000-000000000002",
+        "name": "Severity is CRITICAL",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          260,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "resume": "timeInterval",
+          "amount": "={{ Number($env.ESCALATION_WAIT_MINUTES || 5) }}",
+          "unit": "minutes"
+        },
+        "id": "a1f0c001-0000-4000-8000-000000000003",
+        "name": "Wait for acknowledgement",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          520,
+          200
+        ],
+        "webhookId": "a1f0c001-0000-4000-8000-0000000000a3"
+      },
+      {
+        "parameters": {
+          "method": "GET",
+          "url": "={{ $env.CLINICAL_API_URL || 'http://clinical-api:8082' }}/api/v1/alerts/{{ $('Critical alert queue').item.json.alertId }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "X-Correlation-Id",
+                "value": "=n8n-escalation-{{ $('Critical alert queue').item.json.alertId }}"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 10000,
+            "response": {
+              "response": {
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "id": "a1f0c001-0000-4000-8000-000000000004",
+        "name": "Get alert from clinical-api",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          780,
+          200
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "conditions": [
+              {
+                "id": "still-open",
+                "leftValue": "={{ $json.status }}",
+                "rightValue": "OPEN",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "a1f0c001-0000-4000-8000-000000000005",
+        "name": "Still OPEN?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          1040,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $env.ESCALATION_WEBHOOK_URL }}",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ alertId: $json.alertId, patientId: $json.patientId, severity: $json.severity, message: $json.message, detectedAt: $json.detectedAt, status: $json.status, waitedMinutes: Number($env.ESCALATION_WAIT_MINUTES || 5) }) }}",
+          "options": {
+            "timeout": 10000
+          }
+        },
+        "id": "a1f0c001-0000-4000-8000-000000000006",
+        "name": "POST escalation webhook",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1300,
+          100
+        ],
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "log-outcome",
+                "name": "outcome",
+                "type": "string",
+                "value": "ESCALATED"
+              },
+              {
+                "id": "log-line",
+                "name": "log",
+                "type": "string",
+                "value": "=CRITICAL alert {{ $('Get alert from clinical-api').item.json.alertId }} still OPEN after {{ Number($env.ESCALATION_WAIT_MINUTES || 5) }} min; escalation webhook: {{ $json.error ? 'failed (' + $json.error.message + ')' : 'ok' }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "a1f0c001-0000-4000-8000-000000000007",
+        "name": "Log escalation",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          1560,
+          100
+        ]
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "log-outcome-2",
+                "name": "outcome",
+                "type": "string",
+                "value": "NO_ESCALATION"
+              },
+              {
+                "id": "log-line-2",
+                "name": "log",
+                "type": "string",
+                "value": "=CRITICAL alert {{ $json.alertId }} is {{ $json.status }}; no escalation needed"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "a1f0c001-0000-4000-8000-000000000008",
+        "name": "Log: handled in time",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          1300,
+          320
+        ]
+      },
+      {
+        "parameters": {
+          "content": "## critical-alert-escalation\nclinical-api publishes every CRITICAL alert to RabbitMQ exchange `alerts.notify` (routing key `alert.critical`), bound to queue `notify.critical`.\nAfter `ESCALATION_WAIT_MINUTES` (default 5) the alert is re-read; if it is still OPEN it is POSTed to `ESCALATION_WEBHOOK_URL` (placeholder, no real endpoint ships).\nOnly RabbitMQ, IF, Wait, HTTP and Set nodes: executeCommand, ssh and code are disabled by NODES_EXCLUDE.",
+          "height": 190,
+          "width": 620
+        },
+        "id": "a1f0c001-0000-4000-8000-000000000009",
+        "name": "Note",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -20,
+          20
+        ]
+      }
+    ],
+    "connections": {
+      "Critical alert queue": {
+        "main": [
+          [
+            {
+              "node": "Severity is CRITICAL",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Severity is CRITICAL": {
+        "main": [
+          [
+            {
+              "node": "Wait for acknowledgement",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          []
+        ]
+      },
+      "Wait for acknowledgement": {
+        "main": [
+          [
+            {
+              "node": "Get alert from clinical-api",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Get alert from clinical-api": {
+        "main": [
+          [
+            {
+              "node": "Still OPEN?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Still OPEN?": {
+        "main": [
+          [
+            {
+              "node": "POST escalation webhook",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Log: handled in time",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "POST escalation webhook": {
+        "main": [
+          [
+            {
+              "node": "Log escalation",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "pinData": {},
+    "tags": []
+  }
+]
