@@ -1,0 +1,15 @@
+# Copy to terraform.tfvars (git-ignored by convention) and adjust. No secrets belong here.
+environment = "dev"
+region      = "eu-west-1"
+
+# S3 bucket names are global.
+archive_bucket_name = "vitalstream-archive-123456789012"
+
+# Restrict the public Kubernetes API endpoint to your network.
+eks_public_access_cidrs = ["203.0.113.0/24"]
+
+# Cheap and single-AZ-ish for dev; flip for production.
+single_nat_gateway       = true
+rds_multi_az             = false
+redis_num_cache_clusters = 2
+msk_broker_count         = 3
