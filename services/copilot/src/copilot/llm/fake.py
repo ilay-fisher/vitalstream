@@ -33,6 +33,8 @@ _LABELS = {
     "DIASTOLIC_BP": "Diastolic BP",
     "TEMPERATURE": "Temperature",
 }
+_OPEN = "<untrusted_reference_material>"
+_CLOSE = "</untrusted_reference_material>"
 _DISCLAIMER = (
     "Decision support only. This is not a diagnosis; confirm with the bedside assessment "
     "and your local protocol."
@@ -132,6 +134,8 @@ class FakeLLM:
 
 
 def _parse(content: str) -> Any:
+    if content.startswith(_OPEN):
+        content = content.removeprefix(_OPEN).removesuffix(_CLOSE).split("\n", 2)[-1]
     try:
         return json.loads(content)
     except json.JSONDecodeError:

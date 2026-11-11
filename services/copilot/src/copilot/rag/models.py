@@ -27,6 +27,7 @@ class DocumentRow(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title: Mapped[str] = mapped_column(Text)
     source: Mapped[str] = mapped_column(Text)
+    provenance: Mapped[str] = mapped_column(Text, server_default="api-upload")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

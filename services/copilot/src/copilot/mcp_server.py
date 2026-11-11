@@ -9,13 +9,13 @@ from mcp.server.transport_security import TransportSecuritySettings
 from copilot.tools import CopilotTools
 
 
-def build_mcp(get_tools: Callable[[], CopilotTools]) -> FastMCP:
+def build_mcp(get_tools: Callable[[], CopilotTools], allowed_hosts: list[str]) -> FastMCP:
     """Create the MCP server.
 
     ``get_tools`` is resolved per call because the real tool objects only exist once the app's
     lifespan has connected to Postgres/Elasticsearch.  Stateless HTTP + JSON responses keep it
-    trivially scalable and curl-friendly. DNS-rebinding protection is off because the service is
-    reached by container hostname (`copilot:8083`); put authentication at the gateway in prod.
+    trivially scalable and curl-friendly.  DNS-rebinding protection restricts the Host header
+    to ``allowed_hosts``; the bearer token is enforced by `copilot.security.BearerGuard`.
     """
     server = FastMCP(
         "vitalstream-copilot",
@@ -26,7 +26,11 @@ def build_mcp(get_tools: Callable[[], CopilotTools]) -> FastMCP:
         stateless_http=True,
         json_response=True,
         streamable_http_path="/mcp",
-        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+        transport_security=TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=allowed_hosts,
+            allowed_origins=[f"http://{host}" for host in allowed_hosts],
+        ),
     )
 
     @server.tool()

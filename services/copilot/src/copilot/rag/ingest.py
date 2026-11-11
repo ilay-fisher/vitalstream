@@ -47,7 +47,9 @@ class IngestService:
         self._chunk_tokens = chunk_tokens
         self._overlap_tokens = overlap_tokens
 
-    async def ingest(self, *, title: str | None, content: str, source: str) -> IngestedDocument:
+    async def ingest(
+        self, *, title: str | None, content: str, source: str, provenance: str = "api-upload"
+    ) -> IngestedDocument:
         """Ingest one markdown document.
 
         The Postgres write is the system of record; if indexing in Elasticsearch fails the
@@ -69,6 +71,7 @@ class IngestService:
             resolved_title,
             source,
             [NewChunk(c.ordinal, c.content, e) for c, e in zip(chunks, embeddings, strict=True)],
+            provenance,
         )
         try:
             await self._keyword.index_chunks(stored.chunks)
@@ -86,7 +89,12 @@ class IngestService:
         files = await asyncio.to_thread(lambda: sorted(corpus_dir.glob("*.md")))
         for path in files:
             content = await asyncio.to_thread(path.read_text, "utf-8")
-            await self.ingest(title=None, content=content, source=f"corpus/{path.name}")
+            await self.ingest(
+                title=None,
+                content=content,
+                source=f"corpus/{path.name}",
+                provenance="curated",
+            )
             count += 1
         log.info("corpus_ingested", documents=count, directory=str(corpus_dir))
         return count

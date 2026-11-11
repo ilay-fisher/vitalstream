@@ -36,7 +36,11 @@ async def mcp_session(stack: dict[str, Any]) -> AsyncIterator[ClientSession]:
 
     async with (
         app.router.lifespan_context(app),
-        streamablehttp_client("http://test/mcp", httpx_client_factory=factory) as (read, write, _),
+        streamablehttp_client(
+            "http://localhost:8083/mcp",
+            headers={"Authorization": "Bearer dev-mcp-token"},
+            httpx_client_factory=factory,
+        ) as (read, write, _),
         ClientSession(read, write) as session,
     ):
         await session.initialize()

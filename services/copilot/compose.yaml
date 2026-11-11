@@ -17,6 +17,9 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-fake}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-claude-sonnet-5-5}
+      COPILOT_ADMIN_TOKEN: ${COPILOT_ADMIN_TOKEN:-dev-admin-token}
+      MCP_TOKEN: ${MCP_TOKEN:-dev-mcp-token}
+      LOG_PSEUDONYM_KEY: ${LOG_PSEUDONYM_KEY:-dev-only-pseudonym-key}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       postgres:

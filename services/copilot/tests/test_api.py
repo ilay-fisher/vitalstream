@@ -137,6 +137,7 @@ async def test_chat_failure_ends_stream_with_error_done(stack: dict[str, Any]) -
 async def test_ingest_document_then_find_it_via_search(client: httpx.AsyncClient) -> None:
     created = await client.post(
         "/api/v1/documents",
+        headers={"Authorization": "Bearer dev-admin-token"},
         json={
             "documents": [
                 {
@@ -160,7 +161,11 @@ async def test_ingest_document_then_find_it_via_search(client: httpx.AsyncClient
 
 
 async def test_ingest_blank_document_is_rejected(client: httpx.AsyncClient) -> None:
-    response = await client.post("/api/v1/documents", json={"documents": [{"content": "   "}]})
+    response = await client.post(
+        "/api/v1/documents",
+        json={"documents": [{"content": "   "}]},
+        headers={"Authorization": "Bearer dev-admin-token"},
+    )
     assert response.status_code == 422
     assert response.headers["content-type"].startswith("application/problem+json")
 

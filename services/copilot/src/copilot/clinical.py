@@ -50,7 +50,9 @@ class ClinicalApiClient:
             "to": now.isoformat().replace("+00:00", "Z"),
             "resolution": "raw",
         }
-        return _as_list(await self._get(f"/api/v1/patients/{patient_id}/vitals", params))
+        return _as_list(
+            await self._get(f"/api/v1/patients/{patient_id}/vitals", "patient_vitals", params)
+        )
 
     async def alerts(
         self, patient_id: str | None, severity: str | None, size: int = 20
@@ -61,20 +63,20 @@ class ClinicalApiClient:
             params["patientId"] = patient_id
         if severity:
             params["severity"] = severity
-        return _as_list(await self._get("/api/v1/alerts", params))
+        return _as_list(await self._get("/api/v1/alerts", "alerts", params))
 
-    async def _get(self, path: str, params: dict[str, Any]) -> Any:
+    async def _get(self, path: str, endpoint: str, params: dict[str, Any]) -> Any:
         headers = {}
         if correlation_id := get_correlation_id():
             headers[CORRELATION_HEADER] = correlation_id
         try:
             response = await self._client.get(path, params=params, headers=headers)
         except httpx.HTTPError as exc:
-            log.warning("clinical_api_unreachable", path=path, error=str(exc))
+            log.warning("clinical_api_unreachable", endpoint=endpoint, error=type(exc).__name__)
             raise ClinicalApiError("clinical-api unavailable") from exc
         if response.status_code == 404:
             raise ClinicalApiError("resource not found in clinical-api", not_found=True)
         if response.status_code >= 400:
-            log.warning("clinical_api_error", path=path, status=response.status_code)
+            log.warning("clinical_api_error", endpoint=endpoint, status=response.status_code)
             raise ClinicalApiError(f"clinical-api unavailable (HTTP {response.status_code})")
         return response.json()

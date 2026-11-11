@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 from copilot.correlation import get_correlation_id
 from copilot.llm.types import Message
 from copilot.metrics import CHAT_REQUESTS
+from copilot.pseudonym import patient_ref
+from copilot.security import bearer_matches
 from copilot.services import Services
 
 log = structlog.get_logger()
@@ -53,13 +55,25 @@ def _services(request: Request) -> Services:
     return services
 
 
-async def _chat_stream(services: Services, body: ChatRequest) -> AsyncIterator[str]:
+def require_admin(request: Request) -> None:
+    """Dependency: `Authorization: Bearer COPILOT_ADMIN_TOKEN` (constant-time compare)."""
+    if not bearer_matches(request.headers.get("authorization"), request.app.state.admin_token):
+        raise HTTPException(
+            status_code=401,
+            detail="Missing or invalid bearer token",
+            headers={"WWW-Authenticate": 'Bearer realm="copilot"'},
+        )
+
+
+async def _chat_stream(
+    services: Services, body: ChatRequest, pseudonym_key: str
+) -> AsyncIterator[str]:
     history = services.memory.get(body.sessionId)
     correlation_id = get_correlation_id()
     log.info(
         "chat_started",
         sessionId=body.sessionId,
-        patientId=body.patientId,
+        patientRef=patient_ref(body.patientId, pseudonym_key) if body.patientId else None,
         historyMessages=len(history),
     )
     try:
@@ -96,26 +110,42 @@ async def chat(body: ChatRequest, request: Request) -> StreamingResponse:
     Conversation memory is per `sessionId` and bounded by TTL and size.
     """
     return StreamingResponse(
-        _chat_stream(_services(request), body),
+        _chat_stream(_services(request), body, request.app.state.pseudonym_key),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
-@router.post("/api/v1/documents", status_code=201, summary="Ingest markdown guidelines")
+@router.post(
+    "/api/v1/documents",
+    status_code=201,
+    summary="Ingest markdown guidelines (admin token)",
+    dependencies=[Depends(require_admin)],
+)
 async def ingest_documents(body: DocumentsIn, request: Request) -> dict[str, Any]:
-    """Chunk, embed and index one or more markdown documents into the RAG store."""
+    """Chunk, embed and index markdown documents; requires the admin bearer token.
+
+    Uploaded documents are stored with provenance `api-upload` (the bundled corpus is `curated`).
+    """
     services = _services(request)
     ingested = []
     for document in body.documents:
         try:
             result = await services.ingest.ingest(
-                title=document.title, content=document.content, source=document.source
+                title=document.title,
+                content=document.content,
+                source=document.source,
+                provenance="api-upload",
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         ingested.append(
-            {"documentId": result.document_id, "title": result.title, "chunks": result.chunks}
+            {
+                "documentId": result.document_id,
+                "title": result.title,
+                "chunks": result.chunks,
+                "provenance": "api-upload",
+            }
         )
     return {"documents": ingested}
 
@@ -140,6 +170,7 @@ async def search_documents(
                 "score": round(h.score, 6),
                 "vectorRank": h.vector_rank,
                 "bm25Rank": h.bm25_rank,
+                "provenance": h.provenance,
             }
             for h in hits
         ],

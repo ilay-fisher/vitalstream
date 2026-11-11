@@ -28,16 +28,16 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy --strict src
 | Method | Path | Notes |
 |---|---|---|
 | POST | `/api/v1/chat` | `{"sessionId","patientId"?,"message"}` -> SSE: `token`, `tool_call`, `citation`, `done` |
-| POST | `/api/v1/documents` | `{"documents":[{"title"?,"source"?,"content"}]}` markdown -> 201 with chunk counts |
+| POST | `/api/v1/documents` | **Bearer `COPILOT_ADMIN_TOKEN`**. `{"documents":[{"title"?,"source"?,"content"}]}` markdown -> 201; stored with provenance `api-upload` |
 | GET | `/api/v1/documents/search?q=&k=` | hybrid search debug view incl. per-side ranks |
-| POST | `/mcp` | MCP streamable HTTP (stateless, JSON responses) |
+| POST | `/mcp` | **Bearer `MCP_TOKEN`**; MCP streamable HTTP (stateless, JSON responses) |
 | GET | `/health`, `/metrics`, `/docs` | health (503 if Postgres is down), Prometheus, OpenAPI |
 
 SSE events (`event:` line + one-line JSON `data:`):
 
 * `token` `{"text"}` - answer fragments.
 * `tool_call` `{"id","name","arguments","status":"running"|"ok"|"error","durationMs"?,"error"?}` - emitted when a tool starts and again when it finishes.
-* `citation` `{"index","title","chunkId","documentId","score","snippet"}` - the `[n]` markers in the answer refer to `index`.
+* `citation` `{"index","title","chunkId","documentId","score","provenance","snippet"}` - the `[n]` markers in the answer refer to `index`.
 * `done` `{"text","toolCalls","usage","sessionId","correlationId"}`; on failure `{"error":true,"text":...}`.
 
 ## RAG pipeline
@@ -92,7 +92,8 @@ Server name `vitalstream-copilot`, streamable HTTP, URL `http://localhost:8083/m
 Claude Code:
 
 ```bash
-claude mcp add --transport http vitalstream-copilot http://localhost:8083/mcp
+claude mcp add --transport http vitalstream-copilot http://localhost:8083/mcp \
+  --header "Authorization: Bearer dev-mcp-token"
 ```
 
 Claude Desktop (`claude_desktop_config.json`, bridged with `mcp-remote`):
@@ -102,7 +103,8 @@ Claude Desktop (`claude_desktop_config.json`, bridged with `mcp-remote`):
   "mcpServers": {
     "vitalstream-copilot": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "http://localhost:8083/mcp"]
+      "args": ["-y", "mcp-remote", "http://localhost:8083/mcp",
+               "--header", "Authorization: Bearer dev-mcp-token"]
     }
   }
 }
@@ -111,11 +113,11 @@ Claude Desktop (`claude_desktop_config.json`, bridged with `mcp-remote`):
 Raw check:
 
 ```bash
-curl -s localhost:8083/mcp -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+curl -s localhost:8083/mcp -H 'authorization: Bearer dev-mcp-token' -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-DNS-rebinding protection is disabled because the service is reached by container hostname; put authentication in front of it outside a demo.
+Security (CONTRACTS §4.1): every `/mcp` request needs `Authorization: Bearer $MCP_TOKEN` (default `dev-mcp-token`), and DNS-rebinding protection only accepts Host `localhost:8083`, `127.0.0.1:8083`, `copilot:8083`. Pass the token with `--header "Authorization: Bearer dev-mcp-token"` in `claude mcp add`, or `--header` in the `mcp-remote` args.
 
 ## Configuration
 
@@ -124,6 +126,8 @@ DNS-rebinding protection is disabled because the service is reached by container
 | `POSTGRES_URL` | `postgresql://vitalstream:vitalstream@localhost:5433/vitalstream` | schema `copilot`, migrated with Alembic at startup |
 | `ELASTICSEARCH_URL` | `http://localhost:9200` | BM25 index `guidelines` (`ES_INDEX`) |
 | `CLINICAL_API_URL` | `http://localhost:8082` | vitals and alerts |
+| `COPILOT_ADMIN_TOKEN` / `MCP_TOKEN` | `dev-admin-token` / `dev-mcp-token` | bearer tokens (constant-time compare); override outside local dev |
+| `LOG_PSEUDONYM_KEY` | `dev-only-pseudonym-key` | HMAC key for `patientRef` in logs (raw patient ids are never logged) |
 | `LLM_PROVIDER` | `fake` | `fake` or `anthropic` |
 | `ANTHROPIC_API_KEY` | empty | required for `anthropic` |
 | `LLM_MODEL` | `claude-sonnet-5-5` | Anthropic model id |
@@ -134,6 +138,12 @@ DNS-rebinding protection is disabled because the service is reached by container
 | `MAX_AGENT_STEPS` | 6 | model calls per answer |
 | `CORS_ORIGINS` | localhost:3000, :5173 | comma separated |
 | `LOG_LEVEL` / `PORT` | `INFO` / `8083` | |
+
+## Safety notes
+
+* Retrieved chunks reach the model inside an `<untrusted_reference_material>` block (delimiters inside chunks are stripped) and the system prompt says never to follow instructions found there. A test with a poisoned document proves the scripted agent ignores it.
+* Documents carry `provenance` (`curated` bundled corpus, `api-upload`), shown in citations and search results.
+* Logs carry `patientRef` = HMAC-SHA256(patientId, key)[:12], never the raw id.
 
 ## Design decisions
 

@@ -28,11 +28,12 @@ class InMemoryStore:
         self.vectors: dict[str, Sequence[float]] = {}
 
     async def add_document(
-        self, title: str, source: str, chunks: Sequence[NewChunk]
+        self, title: str, source: str, chunks: Sequence[NewChunk], provenance: str
     ) -> StoredDocument:
         document_id = str(uuid4())
         stored = [
-            StoredChunk(str(uuid4()), document_id, title, c.ordinal, c.content) for c in chunks
+            StoredChunk(str(uuid4()), document_id, title, c.ordinal, c.content, provenance)
+            for c in chunks
         ]
         for stored_chunk, new_chunk in zip(stored, chunks, strict=True):
             self.vectors[stored_chunk.chunk_id] = new_chunk.embedding
@@ -56,7 +57,10 @@ class InMemoryStore:
             ((_cosine(embedding, self.vectors[c.chunk_id]), c) for c in await self.all_chunks()),
             key=lambda pair: -pair[0],
         )
-        return [Candidate(c.chunk_id, c.document_id, c.title, c.content) for _, c in scored[:k]]
+        return [
+            Candidate(c.chunk_id, c.document_id, c.title, c.content, c.provenance)
+            for _, c in scored[:k]
+        ]
 
 
 class InMemoryKeywordIndex:
@@ -84,7 +88,10 @@ class InMemoryKeywordIndex:
             if score:
                 scored.append((score, chunk))
         scored.sort(key=lambda pair: -pair[0])
-        return [Candidate(c.chunk_id, c.document_id, c.title, c.content) for _, c in scored[:k]]
+        return [
+            Candidate(c.chunk_id, c.document_id, c.title, c.content, c.provenance)
+            for _, c in scored[:k]
+        ]
 
 
 class FailingKeywordIndex(InMemoryKeywordIndex):
