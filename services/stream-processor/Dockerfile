@@ -20,6 +20,7 @@ FROM apache/spark:3.5.8-scala2.12-java17-python3-ubuntu
 USER root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3-pip \
+    && dpkg --purge --force-depends linux-libc-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=jars /jars/*.jar /opt/spark/jars/
 

@@ -7,6 +7,10 @@ COPY . .
 RUN npm run build
 
 FROM nginxinc/nginx-unprivileged:1.27-alpine
+# Pick up Alpine security fixes published after the base image was cut (libssl3, libcrypto3, brotli-libs).
+USER root
+RUN apk upgrade --no-cache
+USER 101
 # The official image renders /etc/nginx/templates/*.template with envsubst at start-up.
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
