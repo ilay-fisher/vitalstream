@@ -19,7 +19,7 @@ Grafana provisioning. Source of truth for ports, topics and schemas is [docs/CON
 | prometheus | prom/prometheus:v2.55.1 | 9090 | |
 | grafana | grafana/grafana:11.3.1 | 3001 | `admin`/`admin` |
 | kibana (profile `tools`) | kibana:8.15.3 | 5601 | |
-| n8n (profile `tools`) | n8nio/n8n:1.64.3 | 5678 | |
+| n8n (profile `tools`) | n8nio/n8n:1.64.3 | via proxy 5678 | behind Caddy basic auth (`caddy:2.8.4-alpine`) |
 
 Network `vitalstream`; in-network hostnames equal the service names. Every service has a healthcheck,
 a memory limit and (where stateful) a named volume.
@@ -80,9 +80,12 @@ that are not running show DOWN. Grafana is provisioned with the Prometheus datas
 
 - Every published port is bound to `127.0.0.1`; nothing is reachable from other hosts. In-network access is unchanged.
 - Credentials are local-dev defaults from CONTRACTS (`vitalstream`/`vitalstream`, Grafana `admin`/`admin`). Override with
-  `POSTGRES_PASSWORD`, `RABBITMQ_PASSWORD`, `GRAFANA_ADMIN_PASSWORD`, `N8N_BASIC_AUTH_USER`, `N8N_BASIC_AUTH_PASSWORD`
-  in your shell or a git-ignored `.env`. The n8n default password is a placeholder; set your own.
+  `POSTGRES_PASSWORD`, `RABBITMQ_PASSWORD`, `GRAFANA_ADMIN_PASSWORD`, `N8N_PROXY_USER`, `N8N_PROXY_PASSWORD`
+  in your shell or a git-ignored `.env`.
   Note: Postgres/RabbitMQ passwords only take effect on a fresh volume, and components expect the CONTRACTS defaults.
-- n8n runs with diagnostics off and the `executeCommand` and `ssh` nodes excluded. n8n 1.x manages its owner account in the UI
-  on first start; the basic-auth variables are kept as defence in depth.
+- n8n (profile `tools`) is not published. Only the Caddy `n8n-proxy` listens on 127.0.0.1:5678, with basic auth
+  (`N8N_PROXY_USER`, default `admin`; `N8N_PROXY_PASSWORD`, empty by default). The proxy exits non-zero at start if the
+  password is empty, so use e.g. `N8N_PROXY_PASSWORD=... make infra-up PROFILES=tools`.
+  n8n 1.x creates its owner account in the UI on first visit; do that behind the proxy. Diagnostics are off and the
+  `executeCommand`, `ssh` and `code` nodes are excluded.
 - Elasticsearch has security disabled and Redis has no auth. Never expose this compose stack to a network or run it on a shared host.

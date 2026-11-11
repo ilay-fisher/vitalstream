@@ -109,7 +109,7 @@ check localstack     probe_localstack
 check prometheus     probe_prometheus
 check grafana        probe_grafana
 
-for opt in "kibana|http://localhost:5601/api/status" "n8n|http://localhost:5678/healthz"; do
+for opt in "kibana|http://localhost:5601/api/status" "n8n|http://localhost:5678/proxy-healthz"; do
   svc=${opt%%|*}; url=${opt#*|}
   if [ "$(container_health "$svc")" = "missing" ]; then
     record "$svc" "SKIP" "profile tools not started"
