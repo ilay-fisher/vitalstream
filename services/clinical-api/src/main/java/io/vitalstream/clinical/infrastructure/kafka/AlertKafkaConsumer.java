@@ -3,6 +3,7 @@ package io.vitalstream.clinical.infrastructure.kafka;
 import io.vitalstream.clinical.application.AlertEvent;
 import io.vitalstream.clinical.application.AlertIngestService;
 import io.vitalstream.clinical.application.Correlation;
+import io.vitalstream.clinical.application.PatientRef;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -40,7 +41,7 @@ public class AlertKafkaConsumer {
     MDC.put("offset", String.valueOf(record.offset()));
     try {
       AlertEvent event = parser.parse(record.value());
-      MDC.put("patientId", event.patientId());
+      MDC.put("patientRef", PatientRef.of(event.patientId()));
       MDC.put("alertId", event.alertId().toString());
       ingest.ingest(event, MDC.get(Correlation.MDC_KEY));
       ack.acknowledge();

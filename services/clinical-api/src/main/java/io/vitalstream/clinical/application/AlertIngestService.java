@@ -64,7 +64,8 @@ public class AlertIngestService {
     stored.ifPresent(this::publishLive);
     Outcome outcome = stored.isPresent() ? Outcome.PERSISTED : Outcome.DUPLICATE;
     meters.counter("alerts.consumed", "outcome", outcome.name().toLowerCase()).increment();
-    log.info("Alert {} for patient {}: {}", event.alertId(), event.patientId(), outcome);
+    log.info(
+        "Alert {} for patient {}: {}", event.alertId(), PatientRef.of(event.patientId()), outcome);
     return outcome;
   }
 

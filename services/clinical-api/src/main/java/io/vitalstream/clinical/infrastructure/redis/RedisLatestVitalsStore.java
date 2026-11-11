@@ -2,6 +2,7 @@ package io.vitalstream.clinical.infrastructure.redis;
 
 import io.vitalstream.clinical.application.LatestVital;
 import io.vitalstream.clinical.application.LatestVitalsStore;
+import io.vitalstream.clinical.application.PatientRef;
 import java.util.HashMap;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -32,7 +33,11 @@ public class RedisLatestVitalsStore implements LatestVitalsStore {
       try {
         result.put(metric.toString(), mapper.readValue(json.toString(), LatestVital.class));
       } catch (RuntimeException e) {
-        log.warn("Skipping unreadable latest vital {} for {}: {}", metric, patientId, e.toString());
+        log.warn(
+            "Skipping unreadable latest vital {} for {}: {}",
+            metric,
+            PatientRef.of(patientId),
+            e.toString());
       }
     });
     return result;

@@ -38,6 +38,7 @@ Tests (Docker needed for integration tests, see CONTRIBUTING section 7 for the C
 | `RABBITMQ_URL` | `amqp://vitalstream:vitalstream@localhost:5672` | exchange `alerts.notify` |
 | `AWS_ENDPOINT_URL` / `AWS_REGION` | `` / `us-east-1` | SQS queue `alert-escalations` (endpoint set means LocalStack, dummy credentials) |
 | `LOG_LEVEL` | `INFO` | root log level |
+| `LOG_PSEUDONYM_KEY` | `dev-only-pseudonym-key` | HMAC key for `patientRef` in logs (override outside local dev) |
 | `vitalstream.outbox.batch-size`, `vitalstream.outbox.interval-ms` | `50`, `500` | relay tuning (Spring properties) |
 | `vitalstream.kafka.retries`, `.backoff-initial`, `.backoff-multiplier` | `3`, `500ms`, `2.0` | consumer retry before DLQ |
 | `vitalstream.cors.allowed-origins` | `http://localhost:3000,http://localhost:5173` | CORS |
@@ -131,6 +132,7 @@ sequenceDiagram
 
 ## Logging
 
-JSON on stdout (logstash encoder) with `service` and MDC fields (`correlationId`, `alertId`,
-`patientId`, `topic`, `partition`, `offset`). Correlation id: HTTP header, then Kafka header
+JSON on stdout (logstash encoder). Raw patient ids are never logged: `patientRef` is the first 12 hex chars of HMAC-SHA256(patientId, `LOG_PSEUDONYM_KEY`).
+Fields: with `service` and MDC fields (`correlationId`, `alertId`,
+`patientRef`, `topic`, `partition`, `offset`). Correlation id: HTTP header, then Kafka header
 `correlationId`, then outbox payload, then RabbitMQ/SQS header.
