@@ -36,13 +36,13 @@ variable "volume_size_gb" {
 }
 
 variable "client_broker_encryption" {
-  description = "TLS (secure default, port 9094; clients need security.protocol=SSL, e.g. SPRING_KAFKA_SECURITY_PROTOCOL=SSL) or TLS_PLAINTEXT (also opens 9092)."
+  description = "Client to broker encryption. Only TLS is accepted; plaintext listeners are not available."
   type        = string
   default     = "TLS"
 
   validation {
-    condition     = contains(["TLS", "TLS_PLAINTEXT"], var.client_broker_encryption)
-    error_message = "client_broker_encryption must be TLS or TLS_PLAINTEXT."
+    condition     = var.client_broker_encryption == "TLS"
+    error_message = "client_broker_encryption must be TLS."
   }
 }
 

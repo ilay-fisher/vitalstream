@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/aws"
       version = ">= 5.81.0, < 6.0.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.6.0"
+    }
   }
 
   # Remote state: create the bucket and lock table once, out of band, then uncomment.
@@ -87,7 +91,24 @@ module "msk" {
   allowed_security_group_id = module.eks.cluster_security_group_id
   broker_count              = var.msk_broker_count
   instance_type             = var.msk_instance_type
-  client_broker_encryption  = var.msk_client_broker_encryption
+}
+
+# Redis AUTH token: generated here, kept in Secrets Manager, never in a tfvars file.
+# It does remain in Terraform state, so use an encrypted remote state backend.
+resource "random_password" "redis" {
+  length  = 48
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "redis_auth" {
+  name                    = "${local.name}/redis-auth-token"
+  description             = "ElastiCache Redis AUTH token"
+  recovery_window_in_days = 7
+}
+
+resource "aws_secretsmanager_secret_version" "redis_auth" {
+  secret_id     = aws_secretsmanager_secret.redis_auth.id
+  secret_string = random_password.redis.result
 }
 
 module "elasticache" {
@@ -99,7 +120,7 @@ module "elasticache" {
   allowed_security_group_id = module.eks.cluster_security_group_id
   node_type                 = var.redis_node_type
   num_cache_clusters        = var.redis_num_cache_clusters
-  auth_token                = var.redis_auth_token
+  auth_token                = random_password.redis.result
 }
 
 module "sqs" {
@@ -128,4 +149,5 @@ module "iam" {
   namespace         = var.k8s_namespace
   sqs_queue_arn     = module.sqs.queue_arn
   s3_bucket_arn     = module.s3.bucket_arn
+  msk_cluster_arn   = module.msk.cluster_arn
 }

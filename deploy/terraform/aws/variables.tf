@@ -48,14 +48,20 @@ variable "kubernetes_version" {
 }
 
 variable "eks_endpoint_public_access" {
-  type    = bool
-  default = true
+  description = "Expose the Kubernetes API publicly. Off by default; reach it from inside the VPC."
+  type        = bool
+  default     = false
 }
 
 variable "eks_public_access_cidrs" {
-  description = "Who may reach the public Kubernetes API. Replace 0.0.0.0/0 with your office or VPN range."
+  description = "Who may reach the public Kubernetes API. Required when eks_endpoint_public_access is true; 0.0.0.0/0 is rejected."
   type        = list(string)
-  default     = ["0.0.0.0/0"]
+  default     = []
+
+  validation {
+    condition     = !contains(var.eks_public_access_cidrs, "0.0.0.0/0")
+    error_message = "eks_public_access_cidrs must not contain 0.0.0.0/0."
+  }
 }
 
 variable "node_instance_types" {
@@ -109,11 +115,6 @@ variable "msk_instance_type" {
   default = "kafka.t3.small"
 }
 
-variable "msk_client_broker_encryption" {
-  type    = string
-  default = "TLS"
-}
-
 variable "redis_node_type" {
   type    = string
   default = "cache.t4g.small"
@@ -122,13 +123,6 @@ variable "redis_node_type" {
 variable "redis_num_cache_clusters" {
   type    = number
   default = 2
-}
-
-variable "redis_auth_token" {
-  description = "Optional Redis AUTH token. Supply with TF_VAR_redis_auth_token."
-  type        = string
-  default     = null
-  sensitive   = true
 }
 
 # ---- storage and registry

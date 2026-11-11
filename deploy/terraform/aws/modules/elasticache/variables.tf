@@ -31,10 +31,14 @@ variable "num_cache_clusters" {
 }
 
 variable "auth_token" {
-  description = "Optional Redis AUTH token (16-128 chars). Pass via TF_VAR_redis_auth_token, never commit it. If set, put it in REDIS_URL."
+  description = "Redis AUTH token (16-128 chars, required). The root module generates it with random_password and stores it in Secrets Manager."
   type        = string
-  default     = null
   sensitive   = true
+
+  validation {
+    condition     = var.auth_token != null && try(length(var.auth_token) >= 16 && length(var.auth_token) <= 128, false)
+    error_message = "auth_token is required and must be 16-128 characters; Redis must not run without authentication."
+  }
 }
 
 variable "tags" {

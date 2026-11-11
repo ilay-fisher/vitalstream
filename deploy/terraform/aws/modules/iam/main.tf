@@ -2,9 +2,85 @@
 # Annotate the Helm service account with eks.amazonaws.com/role-arn=<output>.
 locals {
   accounts = {
+    ingest-gateway   = "ingest-gateway"
     clinical-api     = "clinical-api"
     stream-processor = "stream-processor"
   }
+
+  # MSK resource ARNs are derived from the cluster ARN (cluster/<name>/<uuid>).
+  topic_arn_prefix = replace(var.msk_cluster_arn, ":cluster/", ":topic/")
+  group_arn_prefix = replace(var.msk_cluster_arn, ":cluster/", ":group/")
+
+  # Least privilege per CONTRACTS section 2: each service touches only its own topics and groups.
+  # Consumer group ids are assumed to be the service name (or start with it).
+  kafka_access = {
+    ingest-gateway = {
+      write  = ["vitals.raw"]
+      read   = []
+      groups = []
+    }
+    stream-processor = {
+      write  = ["alerts.detected"]
+      read   = ["vitals.raw"]
+      groups = ["stream-processor*"]
+    }
+    clinical-api = {
+      write  = ["alerts.detected.dlq"]
+      read   = ["alerts.detected"]
+      groups = ["clinical-api*"]
+    }
+  }
+
+  kafka_policy = { for svc, a in local.kafka_access : svc => jsonencode({
+    Version = "2012-10-17"
+    Statement = concat(
+      [{
+        Effect   = "Allow"
+        Action   = ["kafka-cluster:Connect"]
+        Resource = [var.msk_cluster_arn]
+      }],
+      length(a.write) > 0 ? [{
+        Effect   = "Allow"
+        Action   = ["kafka-cluster:DescribeTopic", "kafka-cluster:WriteData"]
+        Resource = [for t in a.write : "${local.topic_arn_prefix}/${t}"]
+        }, {
+        Effect   = "Allow"
+        Action   = ["kafka-cluster:WriteDataIdempotently"]
+        Resource = [var.msk_cluster_arn]
+      }] : [],
+      length(a.read) > 0 ? [{
+        Effect   = "Allow"
+        Action   = ["kafka-cluster:DescribeTopic", "kafka-cluster:ReadData"]
+        Resource = [for t in a.read : "${local.topic_arn_prefix}/${t}"]
+        }, {
+        Effect   = "Allow"
+        Action   = ["kafka-cluster:DescribeGroup", "kafka-cluster:AlterGroup"]
+        Resource = [for g in a.groups : "${local.group_arn_prefix}/${g}"]
+      }] : [],
+    )
+  }) }
+}
+
+resource "aws_iam_role" "ingest_gateway" {
+  name               = "${var.name_prefix}-ingest-gateway"
+  assume_role_policy = local.trust["ingest-gateway"]
+  tags               = var.tags
+}
+
+locals {
+  role_ids = {
+    ingest-gateway   = aws_iam_role.ingest_gateway.id
+    clinical-api     = aws_iam_role.clinical_api.id
+    stream-processor = aws_iam_role.stream_processor.id
+  }
+}
+
+resource "aws_iam_role_policy" "kafka" {
+  for_each = local.kafka_policy
+
+  name   = "kafka-${each.key}"
+  role   = local.role_ids[each.key]
+  policy = each.value
 }
 
 # jsonencode (not a policy-document data source) keeps the trust policy known at plan time.

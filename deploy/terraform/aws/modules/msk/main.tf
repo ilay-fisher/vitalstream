@@ -1,26 +1,14 @@
 resource "aws_security_group" "this" {
   name        = "${var.name}-msk"
-  description = "Kafka from the EKS nodes only"
+  description = "Kafka (SASL/IAM over TLS) from the EKS nodes only"
   vpc_id      = var.vpc_id
 
   ingress {
-    description     = "Kafka TLS from EKS nodes"
-    from_port       = 9094
-    to_port         = 9094
+    description     = "Kafka SASL/IAM over TLS from EKS nodes"
+    from_port       = 9098
+    to_port         = 9098
     protocol        = "tcp"
     security_groups = [var.allowed_security_group_id]
-  }
-
-  dynamic "ingress" {
-    for_each = var.client_broker_encryption == "TLS" ? [] : [1]
-
-    content {
-      description     = "Kafka plaintext from EKS nodes (only when client_broker_encryption allows it)"
-      from_port       = 9092
-      to_port         = 9092
-      protocol        = "tcp"
-      security_groups = [var.allowed_security_group_id]
-    }
   }
 
   tags = merge(var.tags, { Name = "${var.name}-msk" })
@@ -59,6 +47,15 @@ resource "aws_msk_cluster" "this" {
   configuration_info {
     arn      = aws_msk_configuration.this.arn
     revision = aws_msk_configuration.this.latest_revision
+  }
+
+  # Clients authenticate with their IRSA role (see the iam module): no shared Kafka credentials.
+  client_authentication {
+    unauthenticated = false
+
+    sasl {
+      iam = true
+    }
   }
 
   encryption_info {

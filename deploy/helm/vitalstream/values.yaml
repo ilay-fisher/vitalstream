@@ -124,8 +124,8 @@ services:
       allowIngressController: true
       allowMonitoring: true
       egressToServices: []
-      # Kafka plaintext, Kafka TLS (MSK), Redis.
-      infraPorts: [9092, 9094, 6379]
+      # Kafka plaintext (kind), MSK SASL/IAM over TLS (9098), Redis.
+      infraPorts: [9092, 9098, 6379]
       egress:
         internet: {enabled: false, ports: [443], cidrs: [0.0.0.0/0]}
 
@@ -165,7 +165,7 @@ services:
       allowMonitoring: true
       egressToServices: []
       # Kafka plaintext/TLS, Redis, Cassandra.
-      infraPorts: [9092, 9094, 6379, 9042]
+      infraPorts: [9092, 9098, 6379, 9042]
       # S3. Prefer a VPC gateway endpoint and disable this (see deploy/README.md).
       egress:
         internet: {enabled: true, ports: [443], cidrs: [0.0.0.0/0]}
@@ -210,7 +210,7 @@ services:
       allowMonitoring: true
       egressToServices: []
       # Kafka, Redis, Postgres, Cassandra, Elasticsearch, RabbitMQ.
-      infraPorts: [9092, 9094, 6379, 5432, 9042, 9200, 5672]
+      infraPorts: [9092, 9098, 6379, 5432, 9042, 9200, 5672]
       # SQS. Prefer a VPC interface endpoint and disable this (see deploy/README.md).
       egress:
         internet: {enabled: true, ports: [443], cidrs: [0.0.0.0/0]}

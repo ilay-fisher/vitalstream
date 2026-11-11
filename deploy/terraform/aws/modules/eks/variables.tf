@@ -12,15 +12,20 @@ variable "private_subnet_ids" {
 }
 
 variable "endpoint_public_access" {
-  description = "Expose the API server publicly. Restrict with public_access_cidrs or turn off and use a VPN/bastion."
+  description = "Expose the API server publicly. Off by default: reach it through a VPN, bastion or SSM inside the VPC."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "public_access_cidrs" {
-  description = "CIDRs allowed to reach the public API endpoint. Change from the default before real use."
+  description = "CIDRs allowed to reach the public API endpoint. Required (non-empty) when endpoint_public_access is true; 0.0.0.0/0 is rejected."
   type        = list(string)
-  default     = ["0.0.0.0/0"]
+  default     = []
+
+  validation {
+    condition     = !contains(var.public_access_cidrs, "0.0.0.0/0") && alltrue([for c in var.public_access_cidrs : can(cidrnetmask(c))])
+    error_message = "public_access_cidrs must be valid IPv4 CIDRs and must not contain 0.0.0.0/0."
+  }
 }
 
 variable "node_instance_types" {

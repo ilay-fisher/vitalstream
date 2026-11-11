@@ -28,6 +28,11 @@ variable "s3_bucket_arn" {
   type        = string
 }
 
+variable "msk_cluster_arn" {
+  description = "MSK cluster ARN (arn:aws:kafka:<region>:<account>:cluster/<name>/<uuid>); per-topic ARNs are derived from it."
+  type        = string
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
