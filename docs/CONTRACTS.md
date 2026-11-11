@@ -227,7 +227,22 @@ JSON log fields: `timestamp`, `level`, `service`, `correlationId`, `message`, pl
 
 **PHI minimisation:** never log raw `patientId` (it is a medical record identifier). Log `patientRef` = first 12 hex chars of HMAC-SHA256(patientId, `LOG_PSEUDONYM_KEY`). Env `LOG_PSEUDONYM_KEY` default `dev-only-pseudonym-key` (must be overridden outside local dev). Same algorithm in every service so refs correlate across logs. Test vector: HMAC-SHA256("P-0001", "dev-only-pseudonym-key") → assert your helper matches the other languages (compute and pin it in a unit test).
 
-**Event-time guard (stream-processor):** before watermarking or any state update, drop events whose `observedAt` is more than 5 min ahead of processing time or older than 24 h; count them (`events_dropped_total{reason}`) and log at WARN with `eventId` only. Prevents watermark poisoning that would suppress alerts.
+**Event-time guard (stream-processor):** before watermarking or any state update, drop events whose `observedAt` is more than 5 min ahead of processing time or older than 24 h; count them (`vitalstream_events_dropped_total{reason}`) and log at WARN with `eventId` only. Prevents watermark poisoning that would suppress alerts.
+
+**Prometheus metric names (Grafana "VitalStream Overview" depends on these):**
+
+| Metric | Type | Labels | Emitted by |
+|---|---|---|---|
+| `vitalstream_events_ingested_total` | counter | `source` (batch\|fhir\|hl7) | ingest-gateway |
+| `vitalstream_events_rejected_total` | counter | `reason` | ingest-gateway |
+| `vitalstream_events_dropped_total` | counter | `reason` (future\|stale) | stream-processor |
+| `vitalstream_alerts_raised_total` | counter | `severity`, `type` | stream-processor (detected), clinical-api (persisted) – add label `service` via scrape config |
+| `http_server_requests_seconds_bucket` | histogram | Spring default | Java services |
+| `kafka_consumergroup_lag` | gauge | kafka-exporter | foundation |
+
+Micrometer names `vitalstream.events.ingested` etc. export as the names above. The event-time guard counter above is `vitalstream_events_dropped_total`.
+
+**Schema validation notes:** `contracts/schemas/device-batch.schema.json` describes the `POST /api/v1/vitals/batch` body. Rules JSON Schema cannot express (observedAt ≤ now + 5 min, ≥ now − 24 h) are enforced in code by the gateway (reject) and stream-processor (drop).
 
 ## 8. Compose integration
 
