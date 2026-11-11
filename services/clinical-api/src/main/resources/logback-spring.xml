@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <!-- Structured JSON on stdout. MDC keys (correlationId, patientId, alertId, topic, ...) become fields. -->
+  <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+      <customFields>{"service":"clinical-api"}</customFields>
+      <fieldNames>
+        <timestamp>timestamp</timestamp>
+        <version>[ignore]</version>
+        <levelValue>[ignore]</levelValue>
+      </fieldNames>
+    </encoder>
+  </appender>
+
+  <springProperty scope="context" name="rootLevel" source="logging.level.root" defaultValue="INFO"/>
+  <root level="${rootLevel}">
+    <appender-ref ref="JSON"/>
+  </root>
+</configuration>

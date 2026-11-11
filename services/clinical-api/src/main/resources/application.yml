@@ -1,0 +1,76 @@
+server:
+  port: ${SERVER_PORT:8082}
+  shutdown: graceful
+
+spring:
+  application:
+    name: clinical-api
+  datasource:
+    url: ${POSTGRES_URL:jdbc:postgresql://localhost:5433/vitalstream}
+    username: ${POSTGRES_USER:vitalstream}
+    password: ${POSTGRES_PASSWORD:vitalstream}
+  flyway:
+    schemas: clinical
+    default-schema: clinical
+    create-schemas: true
+    # infra init already created clinical.patients, so the schema is not empty on first run
+    baseline-on-migrate: true
+    baseline-version: "0"
+  data:
+    redis:
+      url: ${REDIS_URL:redis://localhost:6379}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: clinical-api
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+    listener:
+      ack-mode: manual
+      missing-topics-fatal: false
+  rabbitmq:
+    addresses: ${RABBITMQ_URL:amqp://vitalstream:vitalstream@localhost:5672}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+  mvc:
+    problemdetails:
+      enabled: true
+
+vitalstream:
+  allowed-hosts: ${ALLOWED_HOSTS:localhost,127.0.0.1,clinical-api}
+  elasticsearch:
+    url: ${ELASTICSEARCH_URL:http://localhost:9200}
+  cassandra:
+    contact-points: ${CASSANDRA_CONTACT_POINTS:localhost:9042}
+  sqs:
+    endpoint: ${AWS_ENDPOINT_URL:}
+    region: ${AWS_REGION:us-east-1}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      service: clinical-api
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  level:
+    root: ${LOG_LEVEL:INFO}
