@@ -4,7 +4,7 @@
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>4.0.9</version>
+    <version>4.1.2</version>
     <relativePath/>
   </parent>
 
@@ -16,7 +16,7 @@
 
   <properties>
     <java.version>21</java.version>
-    <springdoc.version>3.0.3</springdoc.version>
+    <springdoc.version>3.2.0</springdoc.version>
     <logstash-encoder.version>9.0</logstash-encoder.version>
     <awssdk.version>2.57.13</awssdk.version>
     <jacoco.version>0.8.16</jacoco.version>
