@@ -9,7 +9,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import io.vitalstream.ingest.domain.model.Metric;
 import io.vitalstream.ingest.domain.model.RawReading;
 import io.vitalstream.ingest.domain.model.RejectionReason;
 import io.vitalstream.ingest.domain.model.Source;
@@ -80,7 +79,7 @@ class IngestServiceTest {
     assertThat(result.accepted()).isEqualTo(2);
     assertThat(result.duplicates()).isZero();
     assertThat(result.rejected()).isEmpty();
-    verify(metrics, org.mockito.Mockito.times(2)).ingested(Source.DEVICE_BATCH, Metric.HEART_RATE);
+    verify(metrics, org.mockito.Mockito.times(2)).ingested(Source.DEVICE_BATCH);
   }
 
   @Test
@@ -158,7 +157,7 @@ class IngestServiceTest {
         .isInstanceOf(PublishFailedException.class);
 
     verify(idempotency).release(ID_1);
-    verify(metrics, never()).ingested(any(), any());
+    verify(metrics, never()).ingested(any());
   }
 
   @Test

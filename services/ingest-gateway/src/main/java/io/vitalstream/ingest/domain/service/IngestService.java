@@ -72,7 +72,7 @@ public class IngestService {
 
     awaitPublish(fresh);
 
-    fresh.forEach(r -> metrics.ingested(r.source(), r.metric()));
+    fresh.forEach(r -> metrics.ingested(r.source()));
     log.info(
         "ingest processed accepted={} duplicates={} rejected={}",
         fresh.size(),
