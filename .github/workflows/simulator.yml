@@ -1,0 +1,23 @@
+name: simulator
+on:
+  pull_request:
+    paths: ["tools/simulator/**", "contracts/**", ".github/workflows/simulator.yml"]
+  push:
+    branches: [main]
+    paths: ["tools/simulator/**", "contracts/**", ".github/workflows/simulator.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/simulator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen
+      - run: uv run ruff check . && uv run ruff format --check .
+      - run: uv run mypy --strict src
+      - run: uv run pytest
+      - name: Integration (real ingest-gateway + Redis + Kafka)
+        run: uv run pytest -m integration -o addopts=""
