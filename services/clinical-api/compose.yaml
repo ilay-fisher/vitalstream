@@ -19,6 +19,7 @@ services:
       AWS_ENDPOINT_URL: http://localstack:4566
       AWS_REGION: ${AWS_REGION:-us-east-1}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_ENV: ${APP_ENV:-dev}
       LOG_PSEUDONYM_KEY: ${LOG_PSEUDONYM_KEY:-dev-only-pseudonym-key}
     depends_on:
       kafka:
