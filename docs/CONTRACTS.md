@@ -100,7 +100,7 @@ Retention: `vitals.raw` 7 days, `alerts.*` 30 days. Replication factor 1 locally
 
 | Field | Type | Rules |
 |---|---|---|
-| alertId | UUID | deterministic: `uuid5(NAMESPACE_URL, "patientId|type|metric|windowStart")` (RFC 4122 URL namespace `6ba7b811-9dad-11d1-80b4-00c04fd430c8`; metric = empty string when null; windowStart ISO-8601 UTC). Lets consumers dedupe replays and recompute ids |
+| alertId | UUID | deterministic: `uuid5(NAMESPACE_URL, "patientId|type|metric|windowStart")` (RFC 4122 URL namespace `6ba7b811-9dad-11d1-80b4-00c04fd430c8`; metric = empty string when null; windowStart formatted `yyyy-MM-ddTHH:mm:ssZ` UTC, no millis). Lets consumers dedupe replays and recompute ids |
 | type | enum | `THRESHOLD`, `TREND_ZSCORE`, `NEWS2`, `ML_ANOMALY` |
 | severity | enum | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
 | metric / value | nullable | set for THRESHOLD and TREND_ZSCORE |
