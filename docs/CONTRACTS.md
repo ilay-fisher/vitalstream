@@ -215,3 +215,4 @@ JSON log fields: `timestamp`, `level`, `service`, `correlationId`, `message`, pl
 - Each component ships `<component-path>/compose.yaml` defining only its own service(s), using in-network hostnames, `depends_on` with `condition: service_healthy` on infra services, and the `vitalstream` network declared `external: false` with the same name.
 - Root `Makefile` (foundation) auto-discovers fragments: `docker compose --project-directory . -f infra/compose.yaml $(foreach f,$(wildcard services/*/compose.yaml tools/*/compose.yaml web/*/compose.yaml),-f $f)`.
 - Make targets: `infra-up`, `infra-down`, `up`, `down`, `ps`, `logs`, `health`, `simulate`, `test`, `clean`.
+- **Security:** every published host port binds to loopback (`"127.0.0.1:8081:8081"`), never `0.0.0.0`. Credentials come from env with local-dev defaults (`${VAR:-default}`). Ad-hoc test containers follow the same rule.
