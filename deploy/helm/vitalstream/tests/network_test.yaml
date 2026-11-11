@@ -125,6 +125,15 @@ tests:
       - equal:
           path: spec.egress[0].to[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
           value: vitalstream-infra
+  - it: stream-processor allows ingress only on the metrics port
+    template: networkpolicy.yaml
+    documentSelector:
+      path: metadata.name
+      value: stream-processor
+    asserts:
+      - equal:
+          path: spec.ingress[0].ports[0].port
+          value: 9404
   - it: network policies can be switched off
     template: networkpolicy.yaml
     set:

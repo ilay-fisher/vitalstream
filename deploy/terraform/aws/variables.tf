@@ -127,9 +127,9 @@ variable "redis_num_cache_clusters" {
 
 # ---- storage and registry
 variable "archive_bucket_name" {
-  description = "S3 names are global: use something like vitalstream-archive-<account-id>."
+  description = "Override the archive bucket name. Null derives <project>-archive-<account-id>-<region>, which is globally unique."
   type        = string
-  default     = "vitalstream-archive"
+  default     = null
 }
 
 variable "archive_force_destroy" {

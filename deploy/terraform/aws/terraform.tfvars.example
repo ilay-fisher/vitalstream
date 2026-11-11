@@ -2,8 +2,8 @@
 environment = "dev"
 region      = "eu-west-1"
 
-# S3 bucket names are global.
-archive_bucket_name = "vitalstream-archive-123456789012"
+# The archive bucket defaults to vitalstream-archive-<account-id>-<region>; override only if needed.
+# archive_bucket_name = "my-unique-bucket"
 
 # The Kubernetes API is private by default. To expose it, list specific CIDRs (0.0.0.0/0 is rejected).
 # eks_endpoint_public_access = true

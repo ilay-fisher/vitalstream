@@ -42,6 +42,10 @@ infra:
   # Leave empty on AWS. Set to the LocalStack URL for local development.
   awsEndpointUrl: ""
   awsRegion: us-east-1
+  # Archive bucket (terraform output archive_bucket). Used for ARCHIVE_URI.
+  archiveBucket: vitalstream-archive
+  # SQS queue NAME; the AWS SDK resolves the URL.
+  sqsQueueName: alert-escalations
 
 secrets:
   # Name of a Secret you created beforehand. When empty the chart expects `<release>-secrets`.
@@ -133,8 +137,9 @@ services:
     enabled: true
     kind: python
     image: {repository: vitalstream/stream-processor, tag: ""}
-    # Not in CONTRACTS.md. Port of the /health + /metrics endpoint (see README known gaps).
-    port: 8084
+    # /health and /metrics are served on METRICS_PORT. The Spark UI (4040) is optional and not exposed.
+    port: 9404
+    portEnv: METRICS_PORT
     replicaCount: 1
     resources:
       requests: {cpu: 500m, memory: 1Gi}
@@ -152,6 +157,7 @@ services:
       REDIS_URL: "{{ .Values.infra.redisUrl }}"
       CASSANDRA_CONTACT_POINTS: "{{ .Values.infra.cassandraContactPoints }}"
       AWS_REGION: "{{ .Values.infra.awsRegion }}"
+      ARCHIVE_URI: "s3a://{{ .Values.infra.archiveBucket }}/vitals_raw"
       AWS_ENDPOINT_URL: "{{ .Values.infra.awsEndpointUrl }}"
     secretEnv: [LOG_PSEUDONYM_KEY]
     optionalSecretEnv: []
@@ -196,6 +202,7 @@ services:
       ELASTICSEARCH_URL: "{{ .Values.infra.elasticsearchUrl }}"
       AWS_REGION: "{{ .Values.infra.awsRegion }}"
       AWS_ENDPOINT_URL: "{{ .Values.infra.awsEndpointUrl }}"
+      VITALSTREAM_SQS_QUEUENAME: "{{ .Values.infra.sqsQueueName }}"
     secretEnv: [LOG_PSEUDONYM_KEY, POSTGRES_PASSWORD, RABBITMQ_PASSWORD]
     optionalSecretEnv: []
     # $(VAR) is expanded by Kubernetes from the secret variables declared before it.
@@ -260,6 +267,8 @@ services:
     kind: web
     image: {repository: vitalstream/dashboard, tag: ""}
     port: 3000
+    # nginx-unprivileged runs as uid 101.
+    runAsUser: 101
     replicaCount: 1
     resources:
       requests: {cpu: 25m, memory: 32Mi}
@@ -267,8 +276,8 @@ services:
     autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 3, targetCPUUtilizationPercentage: 70}
     pdb: {enabled: true, maxUnavailable: 1}
     probes:
-      liveness: {path: /}
-      readiness: {path: /}
+      liveness: {path: /healthz}
+      readiness: {path: /healthz}
       startup: {failureThreshold: 10}
     metricsPath: ""
     # nginx needs its cache and pid directories writable.

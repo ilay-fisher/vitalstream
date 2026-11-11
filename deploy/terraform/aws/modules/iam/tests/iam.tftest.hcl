@@ -100,3 +100,21 @@ run "stream_processor_is_limited_to_the_archive_bucket" {
     error_message = "stream-processor must be limited to object access on the archive bucket"
   }
 }
+
+run "consumer_groups_match_the_services" {
+  command = plan
+
+  assert {
+    condition = (
+      strcontains(aws_iam_role_policy.kafka["stream-processor"].policy, "group/vs-test/uuid-1/spark-kafka-source-*") &&
+      strcontains(aws_iam_role_policy.kafka["clinical-api"].policy, "group/vs-test/uuid-1/clinical-api\"") &&
+      !strcontains(aws_iam_role_policy.kafka["ingest-gateway"].policy, "kafka-cluster:AlterGroup")
+    )
+    error_message = "stream-processor uses spark-kafka-source-*, clinical-api uses group clinical-api, ingest-gateway has no group access"
+  }
+
+  assert {
+    condition     = !strcontains(aws_iam_role_policy.kafka["stream-processor"].policy, "stream-processor*")
+    error_message = "the guessed stream-processor group prefix must be gone"
+  }
+}

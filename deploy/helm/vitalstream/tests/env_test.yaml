@@ -116,3 +116,34 @@ tests:
       - matchRegex:
           path: data.ALLOWED_HOSTS
           pattern: (^|,)vs-copilot(,|$)
+  - it: stream-processor gets METRICS_PORT and the archive URI from the bucket name
+    documentSelector:
+      path: metadata.name
+      value: stream-processor
+    set:
+      infra.archiveBucket: vitalstream-archive-123456789012-eu-west-1
+    asserts:
+      - equal:
+          path: data.METRICS_PORT
+          value: "9404"
+      - equal:
+          path: data.ARCHIVE_URI
+          value: s3a://vitalstream-archive-123456789012-eu-west-1/vitals_raw
+      - equal:
+          path: data.AWS_REGION
+          value: us-east-1
+  - it: clinical-api gets the SQS queue name, not a URL
+    documentSelector:
+      path: metadata.name
+      value: clinical-api
+    asserts:
+      - equal:
+          path: data.VITALSTREAM_SQS_QUEUENAME
+          value: alert-escalations
+  - it: broker url with credentials is never in a ConfigMap
+    documentSelector:
+      path: metadata.name
+      value: clinical-api
+    asserts:
+      - notExists:
+          path: data.RABBITMQ_URL

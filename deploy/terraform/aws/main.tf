@@ -30,13 +30,17 @@ provider "aws" {
   }
 }
 
+data "aws_caller_identity" "current" {}
+
 data "aws_availability_zones" "available" {
   state = "available"
 }
 
 locals {
   name = "${var.project}-${var.environment}"
-  azs  = slice(data.aws_availability_zones.available.names, 0, var.az_count)
+  # S3 names are global: default to prefix + account + region.
+  archive_bucket = coalesce(var.archive_bucket_name, "${var.project}-archive-${data.aws_caller_identity.current.account_id}-${var.region}")
+  azs            = slice(data.aws_availability_zones.available.names, 0, var.az_count)
 
   tags = merge({
     Project     = var.project
@@ -130,7 +134,7 @@ module "sqs" {
 module "s3" {
   source = "./modules/s3"
 
-  bucket_name   = var.archive_bucket_name
+  bucket_name   = local.archive_bucket
   force_destroy = var.archive_force_destroy
 }
 

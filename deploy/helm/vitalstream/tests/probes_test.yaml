@@ -72,3 +72,36 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].ports[0].containerPort
           value: 8083
+  - it: stream-processor serves health on the metrics port 9404
+    documentSelector:
+      path: metadata.name
+      value: stream-processor
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].ports[0].containerPort
+          value: 9404
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /health
+  - it: dashboard probes /healthz on 3000
+    documentSelector:
+      path: metadata.name
+      value: dashboard
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /healthz
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /healthz
+      - equal:
+          path: spec.template.spec.containers[0].ports[0].containerPort
+          value: 3000
+  - it: dashboard runs as the nginx-unprivileged uid 101
+    documentSelector:
+      path: metadata.name
+      value: dashboard
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 101

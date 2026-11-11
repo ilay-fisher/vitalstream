@@ -101,7 +101,8 @@ pgvector on RDS: no parameter group change is needed on PostgreSQL 15.2+; run `C
 
 ## Known gaps
 
-- Ports/health for stream-processor (8084) and dashboard (3000, `/`) and the S3 bucket / SQS queue env names are not in CONTRACTS.md; clinical-api DB credential variable names (`POSTGRES_USER`/`POSTGRES_PASSWORD`) and the broker URL form are assumptions.
+- **The AWS stack is validate-only.** Before a real AWS deploy the services need MSK IAM auth (SASL_SSL / AWS_MSK_IAM) and `rediss://` plus AUTH support; this is recorded as a known gap in CONTRACTS.
+- stream-processor serves `/health` and `/metrics` on `METRICS_PORT` 9404 and reads `ARCHIVE_URI` (`s3a://<bucket>/vitals_raw`, bucket from `infra.archiveBucket` / terraform output `archive_bucket`); clinical-api gets the SQS queue *name* in `VITALSTREAM_SQS_QUEUENAME` (`infra.sqsQueueName`); the dashboard probes `/healthz` and runs as uid 101. `RABBITMQ_URL` (with credentials) is assembled from the Secret in the pod env, never in a ConfigMap.
 - No Cassandra, Elasticsearch or RabbitMQ in Terraform (use Amazon Keyspaces / OpenSearch / Amazon MQ, or in-cluster operators); no TLS/auth for Redis in kind.
 - Kafka topics are not created by the chart or by Terraform (kind auto-creates); no real end-user auth (CONTRACTS known gap).
 - `tflint` is not installed (not available through Homebrew and an automated download was blocked); only `terraform fmt`, `validate` and `test` run.

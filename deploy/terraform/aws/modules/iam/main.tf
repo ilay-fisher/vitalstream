@@ -12,7 +12,8 @@ locals {
   group_arn_prefix = replace(var.msk_cluster_arn, ":cluster/", ":group/")
 
   # Least privilege per CONTRACTS section 2: each service touches only its own topics and groups.
-  # Consumer group ids are assumed to be the service name (or start with it).
+  # Consumer groups: clinical-api uses group.id clinical-api; Spark Structured Streaming generates
+  # spark-kafka-source-* ids. ingest-gateway only produces and needs no group access.
   kafka_access = {
     ingest-gateway = {
       write  = ["vitals.raw"]
@@ -22,12 +23,12 @@ locals {
     stream-processor = {
       write  = ["alerts.detected"]
       read   = ["vitals.raw"]
-      groups = ["stream-processor*"]
+      groups = ["spark-kafka-source-*"]
     }
     clinical-api = {
       write  = ["alerts.detected.dlq"]
       read   = ["alerts.detected"]
-      groups = ["clinical-api*"]
+      groups = ["clinical-api"]
     }
   }
 

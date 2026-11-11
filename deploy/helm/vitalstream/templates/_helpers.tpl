@@ -75,7 +75,7 @@ Non-secret environment of a service as JSON (rendered into the ConfigMap). Entri
 {{- $_ := set $d "ALLOWED_HOSTS" (include "vs.allowedHosts" .) -}}
 {{- end -}}
 {{- if eq $svc.kind "java" -}}{{- $_ := set $d "SERVER_PORT" (toString $svc.port) -}}{{- end -}}
-{{- if eq $svc.kind "python" -}}{{- $_ := set $d "PORT" (toString $svc.port) -}}{{- end -}}
+{{- if eq $svc.kind "python" -}}{{- $_ := set $d (default "PORT" $svc.portEnv) (toString $svc.port) -}}{{- end -}}
 {{- range $k, $v := $svc.config -}}
 {{- $r := tpl (toString $v) $root -}}
 {{- if $r -}}{{- $_ := set $d $k $r -}}{{- end -}}

@@ -37,7 +37,18 @@ output "sqs_queue_url" {
 }
 
 output "archive_bucket" {
-  value = module.s3.bucket_name
+  description = "infra.archiveBucket in the Helm values"
+  value       = module.s3.bucket_name
+}
+
+output "archive_uri" {
+  description = "ARCHIVE_URI for stream-processor"
+  value       = "s3a://${module.s3.bucket_name}/vitals_raw"
+}
+
+output "sqs_queue_name" {
+  description = "infra.sqsQueueName in the Helm values (the SDK resolves the URL)"
+  value       = module.sqs.queue_name
 }
 
 output "clinical_api_role_arn" {

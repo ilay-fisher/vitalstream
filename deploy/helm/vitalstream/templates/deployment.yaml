@@ -45,9 +45,9 @@ spec:
       {{- end }}
       securityContext:
         runAsNonRoot: true
-        runAsUser: {{ $.Values.global.runAsUser }}
-        runAsGroup: {{ $.Values.global.runAsUser }}
-        fsGroup: {{ $.Values.global.runAsUser }}
+        runAsUser: {{ default $.Values.global.runAsUser $svc.runAsUser }}
+        runAsGroup: {{ default $.Values.global.runAsUser $svc.runAsUser }}
+        fsGroup: {{ default $.Values.global.runAsUser $svc.runAsUser }}
         seccompProfile:
           type: RuntimeDefault
       terminationGracePeriodSeconds: 30
