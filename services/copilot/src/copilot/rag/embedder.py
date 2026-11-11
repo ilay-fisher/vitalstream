@@ -1,6 +1,7 @@
 """Embedding backends behind the :class:`~copilot.rag.types.Embedder` protocol."""
 
 import hashlib
+import itertools
 import math
 import re
 from collections.abc import Sequence
@@ -31,7 +32,7 @@ class HashEmbedder:
 
     def _embed(self, text: str) -> list[float]:
         words = _WORD.findall(text.lower()) or ["<empty>"]
-        grams = [*words, *(f"{a}_{b}" for a, b in zip(words, words[1:], strict=False))]
+        grams = [*words, *(f"{a}_{b}" for a, b in itertools.pairwise(words))]
         vector = [0.0] * self.dimensions
         for gram in grams:
             digest = hashlib.blake2b(gram.encode(), digest_size=8).digest()

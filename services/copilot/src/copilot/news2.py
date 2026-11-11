@@ -195,9 +195,7 @@ def compute_news2(
     _validate({"rr": rr, "spo2": spo2, "sbp": sbp, "hr": hr, "temp": temp})
 
     spo2_points = (
-        _spo2_scale1_points(spo2)
-        if spo2_scale == 1
-        else _spo2_scale2_points(spo2, supplemental_o2)
+        _spo2_scale1_points(spo2) if spo2_scale == 1 else _spo2_scale2_points(spo2, supplemental_o2)
     )
     components = {
         "rr": _rr_points(rr),

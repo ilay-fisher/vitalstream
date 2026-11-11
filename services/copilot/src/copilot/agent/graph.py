@@ -35,9 +35,7 @@ SYSTEM_PROMPT = (
     "4. Be concise, flag urgent findings first, and remind the reader that the final decision "
     "rests with the treating clinician."
 )
-STEP_LIMIT_TEXT = (
-    "I stopped at the step limit before finishing. Please ask a narrower question."
-)
+STEP_LIMIT_TEXT = "I stopped at the step limit before finishing. Please ask a narrower question."
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,9 +197,7 @@ class CopilotAgent:
         return Message("tool", json.dumps(result), tool_call_id=call.id, name=call.name)
 
     @staticmethod
-    def _number_and_emit_citations(
-        result: dict[str, Any], ctx: _RunContext, emit: Any
-    ) -> None:
+    def _number_and_emit_citations(result: dict[str, Any], ctx: _RunContext, emit: Any) -> None:
         for hit in result["results"]:
             chunk_id = hit["chunk_id"]
             is_new = chunk_id not in ctx.citations

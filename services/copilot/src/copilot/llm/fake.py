@@ -74,7 +74,7 @@ class FakeLLM:
     def _patient_id(messages: Sequence[Message]) -> str | None:
         for message in reversed(messages):
             if message.role == "user" and (found := _PATIENT.findall(message.content)):
-                return found[-1]
+                return str(found[-1])
         for message in messages:
             if message.role == "system" and (match := _CONTEXT.search(message.content)):
                 return match.group(1)
@@ -87,7 +87,9 @@ class FakeLLM:
             if patient_id is None:
                 return [ToolCall("call_search", "search_guidelines", {"query": user_text, "k": 3})]
             return [
-                ToolCall("call_vitals", "get_patient_vitals", {"patient_id": patient_id, "minutes": 60}),
+                ToolCall(
+                    "call_vitals", "get_patient_vitals", {"patient_id": patient_id, "minutes": 60}
+                ),
                 ToolCall("call_alerts", "list_alerts", {"patient_id": patient_id}),
             ]
         if "search_guidelines" in results or patient_id is None:
@@ -194,7 +196,7 @@ def _general_answer(user_text: str, refs: list[dict[str, Any]]) -> str:
     if not refs:
         return (
             f"{_DISCLAIMER}\n\nI could not find guideline passages relevant to "
-            f"\"{user_text.strip()}\" in the corpus."
+            f'"{user_text.strip()}" in the corpus.'
         )
     lines = [_DISCLAIMER, "", "From the guideline corpus:"]
     lines += [f"- [{r['ref']}] {r['title']}: {_snippet(r['content'])}" for r in refs]
@@ -239,9 +241,7 @@ def _vitals_section(patient_id: str, vitals: dict[str, Any]) -> list[str]:
     lines = [f"Latest vitals for {patient_id} (last {vitals.get('window_minutes', 60)} min):"]
     for metric, entry in latest.items():
         stat = vitals.get("stats", {}).get(metric, {})
-        window = (
-            f" (window {stat['min']:g}-{stat['max']:g}, avg {stat['avg']:g})" if stat else ""
-        )
+        window = f" (window {stat['min']:g}-{stat['max']:g}, avg {stat['avg']:g})" if stat else ""
         lines.append(
             f"- {_LABELS.get(metric, metric)}: {entry['value']:g} {entry.get('unit') or ''}{window}"
         )
