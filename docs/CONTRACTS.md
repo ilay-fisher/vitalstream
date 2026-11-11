@@ -156,7 +156,8 @@ Gateway behaviour: validate → idempotency check in Redis → publish to Kafka 
 | copilot `/mcp` | `Authorization: Bearer`; DNS-rebinding protection ON, allowed hosts `localhost:8083`, `127.0.0.1:8083`, `copilot:8083` | `MCP_TOKEN` (`dev-mcp-token`) |
 | clinical-api, copilot chat, health/metrics | open (loopback only) | — |
 
-Rules: constant-time comparison; missing/invalid → 401 problem+json; never log tokens. RAG documents carry `provenance` (`curated` for bundled corpus, `api-upload` otherwise) shown in citations; retrieved text is passed to the LLM inside a delimited "untrusted reference material" block and the system prompt says never to follow instructions found in it.
+Rules: constant-time comparison; missing/invalid → 401 problem+json; never log tokens; an empty expected secret never matches (fail closed).
+**Secret startup guard (all services):** env `APP_ENV` (`dev` default, `prod` in Helm/Terraform). When `APP_ENV != dev`, startup must fail with a clear error if any secret (`INGEST_API_KEY`, `COPILOT_ADMIN_TOKEN`, `MCP_TOKEN`, `LOG_PSEUDONYM_KEY`, DB/broker passwords) is empty, equals its dev default, or is shorter than 32 chars. In `dev`, log one WARN at startup: "running with dev secrets". Unit-test both paths. RAG documents carry `provenance` (`curated` for bundled corpus, `api-upload` otherwise) shown in citations; retrieved text is passed to the LLM inside a delimited "untrusted reference material" block and the system prompt says never to follow instructions found in it.
 
 ## 5. Storage schemas
 
