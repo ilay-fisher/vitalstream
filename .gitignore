@@ -32,3 +32,6 @@ derby.log
 # Terraform
 .terraform/
 *.tfstate*
+
+# agent worktrees
+.claude/worktrees/
