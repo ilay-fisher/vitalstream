@@ -9,7 +9,7 @@ import structlog
 from copilot.correlation import CORRELATION_HEADER, get_correlation_id
 
 log = structlog.get_logger()
-_LIST_KEYS = ("content", "items", "vitals", "readings", "data", "alerts")
+_LIST_KEYS = ("content", "items", "points", "vitals", "readings", "data", "alerts")
 
 
 class ClinicalApiError(Exception):
