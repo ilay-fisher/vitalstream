@@ -200,8 +200,9 @@ def test_archive_rows_have_dt_and_hour_partitions(spark: SparkSession) -> None:
 @pytest.mark.parametrize(
     ("observed_at", "reason"),
     [
-        ("2026-11-11T21:04:59Z", None),
-        ("2026-11-11T21:05:01Z", "future"),
+        ("2026-11-11T21:00:29Z", None),
+        ("2026-11-11T21:00:31Z", "future"),
+        ("2026-11-11T21:05:00Z", "future"),
         ("2099-01-01T00:00:00Z", "future"),
         ("2026-11-10T21:00:01Z", None),
         ("2026-11-10T20:59:59Z", "stale"),
@@ -213,6 +214,16 @@ def test_event_time_guard(spark: SparkSession, observed_at: str, reason: str | N
     row = df.collect()[0]
     assert row.dropReason == reason
     assert valid_only(df).count() == (0 if reason else 1)
+
+
+def test_future_limit_follows_the_given_watermark_delay(spark: SparkSession) -> None:
+    ahead = event(observedAt="2026-11-11T21:00:45Z")
+    strict = parse_events(kafka_df(spark, [ahead]), now=F.lit(NOW).cast("timestamp"))
+    lenient = parse_events(
+        kafka_df(spark, [ahead]), now=F.lit(NOW).cast("timestamp"), max_future_seconds=60
+    )
+    assert strict.collect()[0].dropReason == "future"
+    assert lenient.collect()[0].dropReason is None
 
 
 def test_malformed_events_have_no_drop_reason(spark: SparkSession) -> None:

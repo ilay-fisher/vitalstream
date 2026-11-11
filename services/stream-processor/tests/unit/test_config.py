@@ -68,3 +68,28 @@ def test_invalid_boolean_rejected() -> None:
 def test_spark_packages_default_and_empty_override() -> None:
     assert "spark-sql-kafka-0-10_2.12:3.5.8" in Settings.from_env({}).spark_packages
     assert Settings.from_env({"SPARK_PACKAGES": ""}).spark_packages == ""
+
+
+def test_watermark_seconds_parsed_from_interval_string() -> None:
+    assert Settings.from_env({}).watermark_seconds == 30
+    assert Settings.from_env({"WATERMARK": "2 minutes"}).watermark_seconds == 120
+    assert Settings.from_env({"WATERMARK": "45 seconds"}).watermark_seconds == 45
+
+
+def test_max_future_skew_is_derived_from_the_watermark() -> None:
+    assert Settings.from_env({}).max_future_skew_seconds == 30
+    assert Settings.from_env({"WATERMARK": "10 seconds"}).max_future_skew_seconds == 10
+
+
+def test_bad_watermark_rejected() -> None:
+    with pytest.raises(ValueError, match="WATERMARK"):
+        Settings.from_env({"WATERMARK": "soon"})
+
+
+def test_startup_assertion_rejects_skew_above_watermark() -> None:
+    from stream_processor.config import assert_skew_within_watermark
+
+    assert_skew_within_watermark(30, 30)
+    assert_skew_within_watermark(10, 30)
+    with pytest.raises(ValueError, match="MAX_FUTURE_SKEW"):
+        assert_skew_within_watermark(31, 30)
