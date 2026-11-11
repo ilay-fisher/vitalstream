@@ -140,6 +140,18 @@ Gateway behaviour: validate → idempotency check in Redis → publish to Kafka 
 
 `AlertView` = AlertEvent fields + `status` (`OPEN`, `ACKNOWLEDGED`, `RESOLVED`), `acknowledgedBy`, `acknowledgedAt`.
 
+As built (clinical-api response shapes):
+
+| Endpoint | Response |
+|---|---|
+| `GET /patients` | bare array of `{id, name, bed, ward, latestVitals:{METRIC:{value, unit, observedAt}}, openAlerts}` |
+| `GET /patients/{id}/vitals` | `{patientId, resolution:"RAW"\|"MINUTE", from, to, points:[…]}`. RAW point `{observedAt, metric, value, unit, deviceId}`; MINUTE point `{observedAt (window start), metric, min, max, avg, count}`. `resolution` query param is case-insensitive. |
+| `GET /alerts` | page `{items:[AlertView], page, size, totalElements, totalPages}`; `q` searches Elasticsearch (there is no `/alerts/search`) |
+| `AlertView` | `{alertId, patientId, type, severity, metric, value, score, message, windowStart, windowEnd, detectedAt, status, acknowledgedBy, acknowledgedAt, acknowledgementNote, version}` |
+| `POST /alerts/{id}/ack` | 200 AlertView; already acknowledged / stale version → 409 |
+| `GET /alerts/stream` | SSE `event: alert`, `id: <alertId>:<version>`, data AlertView. No replay on reconnect. |
+| Errors | `application/problem+json`; 400 validation, 404 unknown id, 409 conflict, 503 dependency down |
+
 ### copilot (8083)
 | Method | Path | Notes |
 |---|---|---|
