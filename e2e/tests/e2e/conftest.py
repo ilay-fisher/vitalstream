@@ -115,7 +115,7 @@ def pipeline(stack: None) -> Iterator[Pipeline]:
         f"{GATEWAY}/api/v1/vitals/batch",
         headers={"X-Api-Key": API_KEY, "X-Correlation-Id": f"e2e-{state.probe_event_id}"},
         json=batch_body(
-            PATIENT, "DEV-E2E-0003", state.probe_event_id, "HEART_RATE", 80.0, datetime.now(UTC)
+            PATIENT, "DEV-ICU-0003", state.probe_event_id, "HEART_RATE", 80.0, datetime.now(UTC)
         ),
         timeout=15,
     )

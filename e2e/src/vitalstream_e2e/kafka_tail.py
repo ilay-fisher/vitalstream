@@ -109,6 +109,7 @@ def tail_topic(bootstrap: str, topic: str) -> KafkaTail:  # pragma: no cover - n
             "group.id": f"e2e-{topic}-{time.time_ns()}",
             "auto.offset.reset": "latest",
             "enable.auto.commit": False,
+            "broker.address.family": "v4",
         }
     )
     consumer.subscribe([topic])

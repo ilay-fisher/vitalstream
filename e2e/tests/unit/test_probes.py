@@ -8,10 +8,10 @@ from vitalstream_e2e.probes import ack_body, batch_body, find_open_alert, tool_c
 def test_batch_body_matches_gateway_contract():
     now = datetime(2026, 11, 12, 10, 0, 0, tzinfo=UTC)
 
-    body = batch_body("P-0003", "DEV-E2E-0003", "e1", "HEART_RATE", 88.0, now)
+    body = batch_body("P-0003", "DEV-ICU-0003", "e1", "HEART_RATE", 88.0, now)
 
     assert body == {
-        "deviceId": "DEV-E2E-0003",
+        "deviceId": "DEV-ICU-0003",
         "patientId": "P-0003",
         "readings": [
             {
