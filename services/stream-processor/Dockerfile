@@ -3,6 +3,7 @@
 FROM curlimages/curl:8.11.1 AS jars
 ARG SPARK_VERSION=3.5.8
 ARG MAVEN=https://repo1.maven.org/maven2
+USER root
 WORKDIR /jars
 RUN set -eux; \
     fetch() { curl -fsSL --retry 3 -O "$MAVEN/$1"; }; \
