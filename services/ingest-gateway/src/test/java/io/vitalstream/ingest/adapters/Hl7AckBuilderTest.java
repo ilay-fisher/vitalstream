@@ -22,7 +22,7 @@ class Hl7AckBuilderTest {
     String ack = acks.accepted(message);
 
     assertThat(ack).startsWith("MSH|^~\\&|INGEST-GATEWAY|");
-    assertThat(ack).contains("|ACK^R01|");
+    assertThat(ack).contains("|ACK^R01^ACK|");
     assertThat(ack).contains("MSA|AA|MSG-0001");
     assertThat(ack).doesNotContain("ERR|");
   }
@@ -52,5 +52,24 @@ class Hl7AckBuilderTest {
   @Test
   void acknowledgementEchoesSenderAsReceiver() {
     assertThat(acks.accepted(message)).contains("|MONITOR-ICU|");
+  }
+
+  @Test
+  void buildingAcksDoesNotWriteAnIdFileIntoTheWorkingDirectory() throws Exception {
+    java.nio.file.Path idFile = java.nio.file.Path.of("id_file");
+    java.nio.file.Files.deleteIfExists(idFile);
+
+    String first = acks.accepted(message);
+    String second = acks.accepted(message);
+
+    assertThat(idFile).doesNotExist();
+    assertThat(first)
+        .matches("(?s)MSH\\|\\^~\\\\&\\|INGEST-GATEWAY\\|\\|MONITOR-ICU\\|\\|\\d{14}.*");
+    assertThat(controlId(first)).isNotBlank().isNotEqualTo(controlId(second));
+    assertThat(first).contains("|P|2.5");
+  }
+
+  private static String controlId(String ack) {
+    return ack.split("\r")[0].split("\\|")[9];
   }
 }
