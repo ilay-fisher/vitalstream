@@ -97,6 +97,8 @@ make simulate                 # stream synthetic patients
 open http://localhost:3000    # dashboard
 ```
 
+Full architecture and interview guide (flows, patterns, algorithms, security, trade-offs): [docs/architecture.html](docs/architecture.html).
+
 See [docs/CONTRACTS.md](docs/CONTRACTS.md) for ports, topics and schemas, and [CONTRIBUTING.md](CONTRIBUTING.md) for engineering rules.
 
 ## How this project was built

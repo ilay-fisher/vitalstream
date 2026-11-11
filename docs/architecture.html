@@ -1,0 +1,564 @@
+<title>VitalStream Architecture</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a bedside-monitor reading room. Sticky section index on wide screens, one reading column, data set in mono like a monitor readout. */
+:root {
+  --bg: #f5f7f7;
+  --surface: #ffffff;
+  --sunken: #eaefef;
+  --ink: #142023;
+  --muted: #56666a;
+  --line: #d3dcdd;
+  --accent: #0b7a75;      /* monitor teal */
+  --accent-soft: #d8eeec;
+  --trace: #0b7a75;
+  --crit: #c2302b; --crit-soft: #fbe3e1;
+  --high: #c0620c; --high-soft: #fcebd9;
+  --med: #8a6d00;  --med-soft: #f8f0cc;
+  --ok: #1d7a3e;   --ok-soft: #dcf1e2;
+  --f-display: "Instrument Sans", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1415; --surface: #131d1f; --sunken: #0a1012; --ink: #e3ecec; --muted: #93a5a8; --line: #24383b;
+    --accent: #3cc9bf; --accent-soft: #10302e; --trace: #3cc9bf;
+    --crit: #ff6b62; --crit-soft: #3a1513; --high: #f2a04f; --high-soft: #3a2410;
+    --med: #e2c64b; --med-soft: #33300f; --ok: #5cd38a; --ok-soft: #12301e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1415; --surface: #131d1f; --sunken: #0a1012; --ink: #e3ecec; --muted: #93a5a8; --line: #24383b;
+  --accent: #3cc9bf; --accent-soft: #10302e; --trace: #3cc9bf;
+  --crit: #ff6b62; --crit-soft: #3a1513; --high: #f2a04f; --high-soft: #3a2410;
+  --med: #e2c64b; --med-soft: #33300f; --ok: #5cd38a; --ok-soft: #12301e;
+  color-scheme: dark;
+}
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--ink); font: 16px/1.6 var(--f-body); }
+a { color: var(--accent) }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+code, .mono { font-family: var(--f-mono); font-size: .88em }
+code { background: var(--sunken); padding: 1px 5px; border-radius: 4px }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; line-height: 1.2; margin: 0 }
+h2 { font-size: 1.7rem; letter-spacing: -.01em }
+h3 { font-size: 1.1rem }
+p { margin: 0 }
+
+.wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.shell { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 48px; padding-block: 8px 80px }
+@media (max-width: 900px) { .shell { grid-template-columns: minmax(0, 1fr) } .toc { display: none } }
+
+/* hero */
+.hero { border-bottom: 1px solid var(--line); background: var(--surface) }
+.hero .wrap { padding-block: 40px 28px; display: grid; gap: 18px }
+.eyebrow { font: 500 .78rem/1 var(--f-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--accent) }
+.hero h1 { font-size: clamp(2.2rem, 5vw, 3.4rem); letter-spacing: -.02em }
+.hero .lead { max-width: 68ch; color: var(--muted); font-size: 1.08rem }
+.ecg { width: 100%; height: 64px; display: block }
+.ecg path { fill: none; stroke: var(--trace); stroke-width: 2; stroke-linejoin: round; stroke-dasharray: 2400; stroke-dashoffset: 0 }
+@media (prefers-reduced-motion: no-preference) { .ecg path { animation: sweep 2.4s ease-out 1 } @keyframes sweep { from { stroke-dashoffset: 2400 } to { stroke-dashoffset: 0 } } }
+.readouts { display: flex; flex-wrap: wrap; gap: 10px 28px; font-family: var(--f-mono) }
+.readout { display: grid; gap: 2px }
+.readout b { font-size: 1.35rem; font-weight: 500; font-variant-numeric: tabular-nums }
+.readout span { font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted) }
+.links { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: .92rem }
+
+/* toc */
+.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); align-self: start; padding-top: 32px; font-size: .9rem }
+.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; counter-reset: s }
+.toc li { counter-increment: s }
+.toc a { display: block; padding: 4px 8px; border-radius: 6px; color: var(--muted); text-decoration: none }
+.toc a::before { content: counter(s, decimal-leading-zero) "  "; font-family: var(--f-mono); font-size: .75rem; color: var(--line) }
+.toc a:hover { background: var(--sunken); color: var(--ink) }
+
+section { padding-top: 48px; display: grid; gap: 18px; scroll-margin-top: 12px }
+.sec-intro { color: var(--muted); max-width: 72ch }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px }
+.grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 8px; align-content: start; min-width: 0 }
+.card p, .card li { color: var(--muted); font-size: .94rem }
+.card ul { margin: 0; padding-left: 18px; display: grid; gap: 4px }
+.kv { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 4px 10px; font-size: .9rem }
+.kv dt { font: 500 .72rem/1.9 var(--f-mono); text-transform: uppercase; letter-spacing: .06em; color: var(--accent) }
+.kv dd { margin: 0; color: var(--muted) }
+.tag { display: inline-block; font: 500 .72rem/1 var(--f-mono); padding: 4px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent) }
+.tags { display: flex; flex-wrap: wrap; gap: 6px }
+
+.diagram { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; overflow-x: auto }
+.diagram pre.mermaid { margin: 0; background: none; min-width: 640px }
+.caption { font-size: .85rem; color: var(--muted) }
+
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface) }
+table { border-collapse: collapse; width: 100%; font-size: .9rem }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line) }
+th { font: 600 .74rem/1.4 var(--f-mono); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); background: var(--sunken) }
+tr:last-child td { border-bottom: 0 }
+td.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap }
+
+.formula { font-family: var(--f-mono); font-size: .88rem; background: var(--sunken); border-radius: 8px; padding: 10px 12px; color: var(--ink); overflow-x: auto; white-space: pre }
+.sev { display: inline-block; font: 600 .72rem/1 var(--f-mono); padding: 4px 7px; border-radius: 4px }
+.sev.crit { background: var(--crit-soft); color: var(--crit) } .sev.high { background: var(--high-soft); color: var(--high) }
+.sev.med { background: var(--med-soft); color: var(--med) } .sev.ok { background: var(--ok-soft); color: var(--ok) }
+.finding { border-left: 3px solid var(--crit) }
+.finding.medium { border-left-color: var(--high) }
+
+.shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px }
+figure { margin: 0; display: grid; gap: 6px }
+figure img { border: 1px solid var(--line); border-radius: 8px; display: block; width: 100%; height: auto }
+figcaption { font-size: .85rem; color: var(--muted) }
+
+details.qa { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px }
+details.qa + details.qa { margin-top: 8px }
+details.qa summary { cursor: pointer; font-weight: 600; font-family: var(--f-display) }
+details.qa p { margin-top: 8px; color: var(--muted); font-size: .95rem; max-width: 80ch }
+.foot { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: .85rem }
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Architecture &amp; interview guide</div>
+    <h1>VitalStream</h1>
+    <p class="lead">A real-time clinical telemetry platform. Bedside devices stream vital signs in FHIR, HL7 v2 or JSON. Spark scores every patient each minute with NEWS2, trend and ML detectors. Alerts reach clinicians through a live dashboard, RabbitMQ, SQS and an AI copilot that answers from patient data and curated guidelines.</p>
+    <svg class="ecg" viewBox="0 0 1200 64" preserveAspectRatio="none" aria-hidden="true"><path d="M0 40 H140 l10 -6 l10 6 H200 l6 4 l8 -38 l8 52 l6 -18 H300 l14 -10 l14 10 H460 l10 -6 l10 6 H520 l6 4 l8 -38 l8 52 l6 -18 H620 l14 -10 l14 10 H780 l10 -6 l10 6 H840 l6 4 l8 -38 l8 52 l6 -18 H940 l14 -10 l14 10 H1200"/></svg>
+    <div class="readouts" aria-label="Measured results">
+      <div class="readout"><b>2,002 ev/s</b><span>gateway load test</span></div>
+      <div class="readout"><b>26 ms</b><span>p95 ingest latency</span></div>
+      <div class="readout"><b>7 services</b><span>Java, Python, React</span></div>
+      <div class="readout"><b>&gt; 80 %</b><span>coverage gate, every service</span></div>
+      <div class="readout"><b>11 PRs</b><span>reviewed and merged</span></div>
+    </div>
+    <div class="links"><a href="https://github.com/ilay-fisher/vitalstream">github.com/ilay-fisher/vitalstream</a><span class="caption">Contracts: <code>docs/CONTRACTS.md</code> · Build board: <code>docs/WORKFLOW.html</code></span></div>
+  </div>
+</header>
+
+<div class="wrap shell">
+<nav class="toc" aria-label="Sections">
+  <ol>
+    <li><a href="#system">System map</a></li>
+    <li><a href="#flows">Key flows</a></li>
+    <li><a href="#services">Services</a></li>
+    <li><a href="#data">Data &amp; messaging</a></li>
+    <li><a href="#patterns">Design patterns</a></li>
+    <li><a href="#algorithms">Algorithms</a></li>
+    <li><a href="#scale">Scale &amp; reliability</a></li>
+    <li><a href="#security">Security &amp; HIPAA</a></li>
+    <li><a href="#delivery">Deploy &amp; delivery</a></li>
+    <li><a href="#screens">Screens</a></li>
+    <li><a href="#tradeoffs">Trade-offs &amp; gaps</a></li>
+    <li><a href="#skills">CV skill map</a></li>
+    <li><a href="#qa">Interview Q&amp;A</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<section id="system">
+  <h2>System map</h2>
+  <p class="sec-intro">Writes flow left to right through Kafka. Reads come back through clinical-api, which owns the clinical record. The copilot never touches the stores of other services; it calls clinical-api over HTTP, the same way the dashboard does.</p>
+  <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  subgraph Edge["Edge"]
+    DEV["Bedside devices / simulator<br/>JSON batch · FHIR R4 · HL7 v2.5"]
+  end
+  subgraph Ingest["ingest-gateway · Spring Boot"]
+    GW["Auth (X-Api-Key, fail closed)<br/>validate · token bucket · idempotency"]
+  end
+  K1[["Kafka vitals.raw<br/>12 partitions, key patientId"]]
+  subgraph Stream["stream-processor · PySpark"]
+    SP["event-time guard → watermark 30 s<br/>1-min windows<br/>threshold · EWMA z · NEWS2 · KMeans"]
+  end
+  K2[["Kafka alerts.detected<br/>6 partitions"]]
+  subgraph Clinical["clinical-api · Spring Boot"]
+    CA["consumer + retry/DLQ<br/>Postgres + outbox<br/>REST · SSE"]
+  end
+  subgraph AI["copilot · FastAPI"]
+    CP["LangGraph agent<br/>hybrid RAG (pgvector + BM25)<br/>MCP server"]
+  end
+  UI["dashboard · React<br/>ward, patient, alerts, chat"]
+  N8N["n8n escalation"]
+  DEV -->|HTTPS| GW --> K1 --> SP --> K2 --> CA
+  GW -.-> R[(Redis)]
+  SP --> CS[(Cassandra<br/>vitals)]
+  SP --> R
+  SP --> S3[(S3 Parquet<br/>archive)]
+  CA --> PG[(Postgres)]
+  CA --> ES[(Elasticsearch)]
+  CA --> MQ{{RabbitMQ}}
+  CA --> SQS{{SQS}}
+  CA -. reads .-> CS
+  CA -. pub/sub .-> R
+  MQ --> N8N
+  UI -->|REST + SSE| CA
+  UI -->|chat SSE| CP
+  CP -->|tools over HTTP| CA
+  CP --> PG
+  CP --> ES
+  K2 -.->|poison| DLQ[["alerts.detected.dlq"]]
+</pre>
+  </div>
+  <p class="caption">Solid arrows carry the alert path. Dashed arrows are reads, cache and side channels.</p>
+</section>
+
+<section id="flows">
+  <h2>Key flows</h2>
+  <p class="sec-intro">Four flows cover most interview follow-ups: how a reading becomes an alert, how one alert reaches four sinks exactly once, how the copilot answers, and how two clinicians acknowledging at once is resolved.</p>
+
+  <h3>1 · Reading to alert</h3>
+  <div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant D as Device
+  participant G as ingest-gateway
+  participant R as Redis
+  participant K as Kafka
+  participant S as Spark job
+  D->>G: POST /vitals/batch (X-Api-Key, X-Correlation-Id)
+  G->>G: decode path, check key (fail closed), schema + range check
+  G->>R: Lua token bucket rl:{deviceId}
+  alt bucket empty
+    G-->>D: 429 + Retry-After
+  end
+  G->>R: SET idem:{eventId} NX EX 24h
+  G->>K: produce vitals.raw (acks=all, idempotent producer)
+  G-->>D: 202 {accepted, duplicates, rejected}
+  K->>S: micro-batch (maxOffsetsPerTrigger)
+  S->>S: drop events > 30 s ahead or > 24 h old, then withWatermark(30 s)
+  S->>S: 1-min window per patient → detectors
+  S->>R: latest vitals, EWMA state, alert:emitted ledger
+  S->>K: alerts.detected (alertId = uuid5)
+</pre>
+  </div>
+
+  <h3>2 · One alert, four sinks, exactly once in effect</h3>
+  <div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant K as Kafka alerts.detected
+  participant C as clinical-api consumer
+  participant P as Postgres
+  participant O as Outbox relay
+  participant X as ES · RabbitMQ · SQS
+  participant U as Redis pub/sub → SSE
+  K->>C: AlertEvent
+  alt cannot parse
+    C->>K: alerts.detected.dlq (bytes + error header)
+  end
+  C->>P: BEGIN · INSERT alert ON CONFLICT DO NOTHING · INSERT outbox rows · COMMIT
+  Note over C,P: duplicate alertId = no rows, no side effects
+  C->>U: publish (live feed)
+  loop every few seconds, batches of 50
+    O->>P: SELECT unpublished outbox FOR UPDATE SKIP LOCKED
+    O->>X: index / notify / escalate
+    O->>P: mark published_at
+  end
+</pre>
+  </div>
+
+  <h3>3 · Copilot answer</h3>
+  <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  Q["Clinician question<br/>+ patientId"] --> A{"LangGraph agent<br/>max 6 steps"}
+  A -->|tool| T1["get_patient_vitals<br/>(clinical-api)"]
+  A -->|tool| T2["list_alerts<br/>(clinical-api)"]
+  A -->|tool| T3["compute_news2"]
+  A -->|tool| T4["search_guidelines"]
+  T4 --> V["pgvector HNSW<br/>cosine, top k"]
+  T4 --> B["Elasticsearch BM25"]
+  V --> F["Reciprocal rank fusion"]
+  B --> F
+  T1 & T2 & T3 & F --> A
+  A --> S["SSE: session → tool_call → citation → token … → done(usage)"]
+  A -.-> L["LLM provider<br/>fake (default) or Claude"]
+</pre>
+  </div>
+
+  <h3>4 · Concurrent acknowledgement</h3>
+  <div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+  participant A as Nurse A
+  participant B as Nurse B
+  participant API as clinical-api
+  participant DB as Postgres
+  A->>API: POST /alerts/42/ack {by, note}
+  B->>API: POST /alerts/42/ack {by, note}
+  API->>DB: read alert (version 0, OPEN)
+  API->>DB: UPDATE … SET status='ACKNOWLEDGED', version=1 WHERE id=42 AND version=0
+  DB-->>API: 1 row
+  API-->>A: 200 AlertView (version 1)
+  API->>DB: read alert (version 1, ACKNOWLEDGED)
+  API-->>B: 409 problem+json (already acknowledged)
+</pre>
+  </div>
+</section>
+
+<section id="services">
+  <h2>Services</h2>
+  <p class="sec-intro">Each service owns its paths, its tests, its Dockerfile and compose fragment, and its CI workflow. They only meet through the contract in <code>docs/CONTRACTS.md</code>.</p>
+  <div class="grid2">
+    <article class="card"><h3>ingest-gateway</h3><div class="tags"><span class="tag">Java 21</span><span class="tag">Spring Boot 4</span><span class="tag">HAPI FHIR</span><span class="tag">HL7 v2</span></div>
+      <dl class="kv"><dt>Job</dt><dd>Accept device data in three formats, normalise to one event, publish once.</dd><dt>Edge</dt><dd>Fail-closed API key filter on the decoded path, token bucket per device, Redis idempotency.</dd><dt>Out</dt><dd><code>vitals.raw</code>, HL7 ACK (AA/AE).</dd></dl></article>
+    <article class="card"><h3>stream-processor</h3><div class="tags"><span class="tag">PySpark 3.5</span><span class="tag">Structured Streaming</span><span class="tag">Spark ML</span></div>
+      <dl class="kv"><dt>Job</dt><dd>Window vitals per patient and minute, run four detectors, write state and archive.</dd><dt>Guard</dt><dd>Event-time bounds before the watermark so one bad clock cannot stall alerting.</dd><dt>Out</dt><dd>Cassandra, Redis, S3 Parquet, <code>alerts.detected</code>.</dd></dl></article>
+    <article class="card"><h3>clinical-api</h3><div class="tags"><span class="tag">Spring Boot 4</span><span class="tag">Flyway</span><span class="tag">Spring Kafka</span><span class="tag">AWS SDK v2</span></div>
+      <dl class="kv"><dt>Job</dt><dd>Own the clinical record: alerts, acknowledgements, patient views, live feed.</dd><dt>Write</dt><dd>Idempotent insert + transactional outbox to ES, RabbitMQ, SQS.</dd><dt>Read</dt><dd>Cassandra history with Redis cache-aside, ES search, SSE stream.</dd></dl></article>
+    <article class="card"><h3>copilot</h3><div class="tags"><span class="tag">FastAPI</span><span class="tag">LangGraph</span><span class="tag">pgvector</span><span class="tag">MCP</span></div>
+      <dl class="kv"><dt>Job</dt><dd>Answer bedside questions with tool calls and cited guidelines.</dd><dt>LLM</dt><dd>Pluggable provider. Deterministic fake by default; Claude with <code>ANTHROPIC_API_KEY</code>.</dd><dt>MCP</dt><dd>Same four tools exposed to any MCP client, bearer-token protected.</dd></dl></article>
+    <article class="card"><h3>dashboard</h3><div class="tags"><span class="tag">React 18</span><span class="tag">TypeScript strict</span><span class="tag">Vite</span><span class="tag">Playwright</span></div>
+      <dl class="kv"><dt>Job</dt><dd>Ward overview sorted by NEWS2, patient charts, alert feed, copilot chat.</dd><dt>Live</dt><dd>SSE with optimistic acknowledgement and 409 handling.</dd><dt>Serve</dt><dd>nginx-unprivileged, same-origin proxy, no CORS.</dd></dl></article>
+    <article class="card"><h3>simulator</h3><div class="tags"><span class="tag">Python 3.12</span><span class="tag">httpx</span><span class="tag">typer</span></div>
+      <dl class="kv"><dt>Job</dt><dd>20 synthetic patients with sepsis, hypoxia, arrhythmia and sensor-fault scenarios.</dd><dt>Load</dt><dd><code>load --rate 2000</code> reports p50/p95; retries on 429 and 503.</dd><dt>Ids</dt><dd>UUIDv5 event ids so a replay dedupes.</dd></dl></article>
+  </div>
+</section>
+
+<section id="data">
+  <h2>Data &amp; messaging</h2>
+  <p class="sec-intro">Each store is chosen for one access pattern. Polyglot persistence is the point to defend: the cost is more moving parts, the gain is that no store is bent into a shape it is bad at.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Store</th><th>Holds</th><th>Access pattern</th><th>Why this store</th></tr></thead>
+    <tbody>
+      <tr><td>Kafka</td><td><code>vitals.raw</code> (12 p), <code>alerts.detected</code> (6 p), DLQ</td><td>Append, replay, partition by patientId</td><td>Ordering per patient, replay for recovery, consumer groups scale out.</td></tr>
+      <tr><td>Cassandra</td><td><code>vitals_raw</code> PK ((patient, day), observed_at…), <code>vitals_by_minute</code></td><td>Time range for one patient</td><td>Write-heavy time series; day bucket bounds partition size; 30-day TTL.</td></tr>
+      <tr><td>Postgres</td><td>patients, alerts (versioned), outbox; copilot documents, chunks (vector 384)</td><td>Transactions, joins, HNSW search</td><td>Outbox needs the alert and the event in one commit. pgvector keeps RAG in the same DB.</td></tr>
+      <tr><td>Redis</td><td>idempotency, token buckets, latest vitals, EWMA state, alert ledger, cache, pub/sub</td><td>Sub-ms key lookups with TTL</td><td>Shared state across gateway replicas and Spark micro-batches.</td></tr>
+      <tr><td>Elasticsearch</td><td><code>alerts</code>, <code>guidelines</code></td><td>Full text (english analyzer), BM25</td><td>Alert search and the keyword half of hybrid retrieval.</td></tr>
+      <tr><td>RabbitMQ</td><td>topic exchange <code>alerts.notify</code>, routing <code>alert.&lt;severity&gt;</code></td><td>Push to on-call consumers</td><td>Per-severity routing and DLX, fits work queues better than a log.</td></tr>
+      <tr><td>SQS</td><td><code>alert-escalations</code> + DLQ (maxReceive 5)</td><td>Durable hand-off to AWS side</td><td>Managed queue for escalation workers outside the cluster.</td></tr>
+      <tr><td>S3 (Parquet)</td><td>raw vitals by <code>dt=/hour=</code></td><td>Batch analytics, Athena</td><td>Cheap cold storage, partition pruning, training data for KMeans.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="patterns">
+  <h2>Design patterns</h2>
+  <p class="sec-intro">Where each pattern lives in the code and the trade-off it buys.</p>
+  <div class="grid3">
+    <article class="card"><h3>Hexagonal (ports &amp; adapters)</h3><p>Gateway parses FHIR, HL7 and JSON in adapters into one domain event. clinical-api's application layer depends on <code>AlertRepository</code>, not JDBC.</p><p><b>Buys:</b> new device format = new adapter, tests without Docker.</p></article>
+    <article class="card"><h3>Strategy</h3><p>Detectors (threshold, EWMA, NEWS2, KMeans) share one interface. The copilot's LLM provider and embedder are strategies chosen by env var.</p><p><b>Buys:</b> fake LLM in CI, Claude in production, same code path.</p></article>
+    <article class="card"><h3>Transactional outbox</h3><p>Alert row and outbox rows commit together. A relay publishes with <code>FOR UPDATE SKIP LOCKED</code> and marks <code>published_at</code>.</p><p><b>Buys:</b> no dual-write gap between DB and brokers. <b>Costs:</b> at-least-once delivery, so sinks must be idempotent.</p></article>
+    <article class="card"><h3>Idempotent consumer</h3><p>Gateway: <code>SET idem:{eventId} NX</code>. clinical-api: <code>INSERT … ON CONFLICT DO NOTHING</code> on a deterministic uuid5 alertId. EWMA stores the last applied timestamp.</p><p><b>Buys:</b> replays and retries are harmless.</p></article>
+    <article class="card"><h3>Retry + dead-letter queue</h3><p>Spring Kafka retries transient errors with backoff. Poison records go to <code>alerts.detected.dlq</code> with original bytes and an <code>error</code> header.</p><p><b>Buys:</b> one bad message cannot block a partition.</p></article>
+    <article class="card"><h3>CQRS-lite</h3><p>Writes go through Kafka and the outbox. Reads are served from read-optimised stores: Cassandra history, Redis latest, ES search.</p><p><b>Buys:</b> each read path scales alone. <b>Costs:</b> eventual consistency between views.</p></article>
+    <article class="card"><h3>Cache-aside</h3><p>Vitals history cached in Redis for 10 s keyed by a hash of the query.</p><p><b>Buys:</b> a ward of dashboards polling the same patient hits Cassandra once per 10 s.</p></article>
+    <article class="card"><h3>Optimistic locking</h3><p>Alerts carry <code>version</code>. Ack is a compare-and-set update; a lost race returns 409.</p><p><b>Buys:</b> no row locks held across HTTP calls.</p></article>
+    <article class="card"><h3>Publish / subscribe</h3><p>Kafka between services, Redis pub/sub fanning alerts to every clinical-api replica's SSE clients, RabbitMQ topic exchange to n8n.</p><p><b>Buys:</b> producers never know their consumers.</p></article>
+    <article class="card"><h3>Agent with tools (ReAct)</h3><p>LangGraph state machine: model → tools → model, capped at 6 steps. Tools are typed functions, also exposed over MCP.</p><p><b>Buys:</b> answers grounded in live data, with citations.</p></article>
+    <article class="card"><h3>Contract-first</h3><p>One contract file for topics, schemas, ports, env vars and response shapes. JSON Schemas and wire samples have their own tests.</p><p><b>Buys:</b> seven services built in parallel without waiting on each other.</p></article>
+    <article class="card"><h3>Fail closed</h3><p>Auth filter denies unless the decoded path is on an allowlist. Services refuse to start outside dev with default or short secrets.</p><p><b>Buys:</b> a config mistake shows as an outage, not a leak.</p></article>
+  </div>
+</section>
+
+<section id="algorithms">
+  <h2>Algorithms</h2>
+  <div class="grid2">
+    <article class="card"><h3>NEWS2 (National Early Warning Score 2)</h3>
+      <p>Each vital maps to 0–3 points; the sum drives escalation. Computed per patient per 1-minute window from the window means.</p>
+      <div class="tbl"><table>
+        <thead><tr><th>Total</th><th>Risk</th><th>Response</th></tr></thead>
+        <tbody>
+          <tr><td class="num">0–4</td><td><span class="sev ok">Low</span></td><td>Routine monitoring</td></tr>
+          <tr><td class="num">3 in one</td><td><span class="sev med">Low-medium</span></td><td>Urgent ward review</td></tr>
+          <tr><td class="num">5–6</td><td><span class="sev high">Medium</span></td><td>Urgent response</td></tr>
+          <tr><td class="num">≥ 7</td><td><span class="sev crit">High</span></td><td>Emergency response</td></tr>
+        </tbody>
+      </table></div>
+      <p>Inputs: respiration rate, SpO2, systolic BP, heart rate, temperature (consciousness and supplemental O2 not modelled).</p>
+    </article>
+    <article class="card"><h3>EWMA z-score (trend)</h3>
+      <div class="formula">μₜ = μₜ₋₁ + α (xₜ − μₜ₋₁)          α = 0.1
+σ²ₜ = (1 − α) (σ²ₜ₋₁ + α (xₜ − μₜ₋₁)²)
+z = (xₜ − μₜ₋₁) / σₜ₋₁         alert if |z| ≥ 3</div>
+      <p>O(1) memory per patient and metric, held in Redis <code>ewma:{patient}:{metric}</code> with the last applied timestamp so a replayed batch is skipped.</p>
+      <p><b>Known cost:</b> at 3σ on Gaussian noise, about 0.3% of windows alert by chance. A minimum-n warm-up and alert suppression keep that in check.</p>
+    </article>
+    <article class="card"><h3>KMeans anomaly score</h3>
+      <p>Spark ML trains KMeans offline on standardised 6-feature window means (HR, SpO2, RR, SBP, DBP, temp) from the S3 archive. Centroids are exported to JSON.</p>
+      <div class="formula">score = min_k ‖ (x − mean) / std − c_k ‖₂
+alert ML_ANOMALY if score &gt; threshold</div>
+      <p>Scoring runs in plain Python on the exported centroids: no JVM round trip per window, and the maths is unit-testable.</p>
+    </article>
+    <article class="card"><h3>Reciprocal rank fusion</h3>
+      <div class="formula">RRF(d) = Σ_r 1 / (k + rank_r(d))        k = 60</div>
+      <p>Merges the pgvector (cosine, HNSW) list and the BM25 list without calibrating their incomparable scores. Documents found by both rise to the top. Chunks are ~400 tokens with 60 overlap.</p>
+    </article>
+    <article class="card"><h3>Token bucket (Redis Lua)</h3>
+      <div class="formula">tokens = min(burst, tokens + rate · Δt)
+if tokens ≥ 1: tokens −= 1, allow
+else: deny, Retry-After = (1 − tokens) / rate</div>
+      <p>50 req/s, burst 100 per device. Runs as one Lua script so read-modify-write is atomic across gateway replicas.</p>
+    </article>
+    <article class="card"><h3>Watermarks and watermark poisoning</h3>
+      <p>Spark's watermark = max event time seen − 30 s. Windows older than that are finalised and late data dropped.</p>
+      <p><b>Attack:</b> one event stamped a year ahead pushes the watermark forward, so every real event looks late and alerting stops silently.</p>
+      <p><b>Fix:</b> drop events more than <code>MAX_FUTURE_SKEW</code> ahead (≤ watermark delay, asserted at startup) or more than 24 h old <i>before</i> <code>withWatermark</code>; count them in <code>vitalstream_events_dropped_total</code>. The gateway also rejects &gt; 5 min ahead.</p>
+    </article>
+    <article class="card"><h3>Deterministic ids</h3>
+      <div class="formula">alertId = uuid5(NAMESPACE_URL, "patientId|type|metric|windowStart")</div>
+      <p>The same window always yields the same alertId, so Spark's update-mode re-emits and Kafka redeliveries collapse into one row downstream. The simulator uses uuid5 event ids for the same reason.</p>
+    </article>
+    <article class="card"><h3>Pseudonymous log key</h3>
+      <div class="formula">patientRef = HMAC-SHA256(key, patientId)[:12]     P-0001 → 26043831372c</div>
+      <p>Logs carry <code>patientRef</code>, never the raw id. Stable, so you can correlate one patient across services; keyed, so it cannot be reversed by hashing all ids.</p>
+    </article>
+  </div>
+</section>
+
+<section id="scale">
+  <h2>Scale &amp; reliability</h2>
+  <div class="grid2">
+    <article class="card"><h3>Throughput path</h3><ul>
+      <li>Partition key <code>patientId</code>: per-patient order, parallel across 12 partitions.</li>
+      <li>Gateway is stateless; HPA scales it, Redis holds shared state.</li>
+      <li>Spark caps <code>maxOffsetsPerTrigger</code> for backpressure; checkpoints for exactly-once source offsets.</li>
+      <li>Cassandra day buckets keep partitions bounded under constant writes.</li>
+      <li>Measured: 2,002 events/s from one simulator, p50 14 ms, p95 26 ms, zero rejects.</li>
+    </ul></article>
+    <article class="card"><h3>Failure handling</h3><ul>
+      <li>Producer <code>acks=all</code> + idempotence: no duplicates from producer retries.</li>
+      <li>Consumer retry with backoff, then DLQ with original bytes and headers.</li>
+      <li>Outbox survives broker outages; relay catches up when they return.</li>
+      <li>Kubernetes probes per service, PodDisruptionBudgets, default-deny NetworkPolicies.</li>
+      <li>503 problem+json when a dependency is down instead of hanging.</li>
+    </ul></article>
+    <article class="card"><h3>Observability</h3><ul>
+      <li>JSON logs everywhere with <code>service</code> and <code>correlationId</code>, carried HTTP → Kafka header → RabbitMQ/SQS attribute.</li>
+      <li>Prometheus: events ingested/rejected/dropped, alerts raised by severity and type, outbox lag, DLQ count, consumer lag, LLM tokens.</li>
+      <li>Grafana, Kafka UI and Kibana in the local stack.</li>
+    </ul></article>
+    <article class="card"><h3>Consistency model</h3><ul>
+      <li>Alert record: strongly consistent in Postgres.</li>
+      <li>Search, notifications, live feed: eventually consistent via the outbox and pub/sub.</li>
+      <li>End to end: at-least-once delivery + idempotent sinks = effectively once.</li>
+    </ul></article>
+  </div>
+</section>
+
+<section id="security">
+  <h2>Security &amp; HIPAA</h2>
+  <p class="sec-intro">Synthetic data only, but built as if it held PHI. HIPAA's technical safeguards map to access control, audit (correlated logs), integrity (idempotency, versioning) and transmission security (TLS in the AWS stack).</p>
+  <div class="grid2">
+    <article class="card"><h3>Controls in place</h3><ul>
+      <li>Gateway: X-Api-Key, fail closed on the decoded, semicolon-stripped path; ambiguous URIs get 400.</li>
+      <li>Copilot documents and MCP: constant-time bearer token check.</li>
+      <li>Host allowlist (<code>ALLOWED_HOSTS</code>) against DNS rebinding.</li>
+      <li><code>APP_ENV</code> guard: outside dev, secrets must be ≥ 32 chars and not defaults.</li>
+      <li>No PHI at INFO; patientRef pseudonym in logs.</li>
+      <li>All local ports bound to loopback; n8n behind a fail-closed proxy with executeCommand, ssh and code nodes disabled.</li>
+      <li>Kubernetes: non-root containers, default-deny NetworkPolicy, internet egress excludes private ranges.</li>
+      <li>AWS: private EKS endpoint, IMDSv2 hop limit 1, IRSA per service, MSK IAM auth over TLS, Redis AUTH + TLS.</li>
+    </ul></article>
+    <article class="card"><h3>Standards</h3><ul>
+      <li><b>FHIR R4</b> Observation and Bundle (type batch), LOINC codes, via HAPI FHIR.</li>
+      <li><b>HL7 v2.5</b> ORU^R01: PID-3 patient, OBX-3 LOINC, OBX-5 value, OBX-14 time, OBX-18 device; ACK AA/AE.</li>
+      <li><b>NEWS2</b> as the clinical escalation scale.</li>
+    </ul></article>
+  </div>
+  <h3>Findings caught in review</h3>
+  <div class="grid2">
+    <article class="card finding"><span class="sev crit">High · fixed</span><h3>Gateway auth bypass</h3><p>The filter matched the raw URI. <code>/api/v1;x=1/vitals/batch</code> and <code>/%61pi/v1/…</code> returned 202 without a key. Fixed by deciding on the decoded, normalised path and rejecting ambiguous ones; regression tests for each variant.</p></article>
+    <article class="card finding"><span class="sev crit">High · fixed</span><h3>Watermark poisoning</h3><p>A single far-future timestamp could freeze alerting for every patient. Fixed with the event-time guard before the watermark, plus the gateway's 5-minute future limit.</p></article>
+    <article class="card finding medium"><span class="sev high">Medium · fixed</span><h3>Open pod egress</h3><p>NetworkPolicy allowed 0.0.0.0/0, which includes the cloud metadata service and the cluster. Now excludes RFC1918, link-local, CGNAT and cluster CIDRs, and is off for services that need no internet.</p></article>
+    <article class="card finding medium"><span class="sev high">Medium · fixed</span><h3>Terraform defaults</h3><p>Public EKS API from anywhere, Redis without AUTH, MSK without client auth, node IMDS reachable from pods (IRSA bypass). All four closed, each with a failing <code>terraform test</code> first.</p></article>
+  </div>
+</section>
+
+<section id="delivery">
+  <h2>Deploy &amp; delivery</h2>
+  <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  PR["Pull request"] --> PW["Per-service workflow<br/>paths filter"]
+  PW --> L["lint · format · types"] --> U["unit (no Docker)"] --> I["integration<br/>Testcontainers"] --> C["coverage ≥ 80 %"]
+  C --> D["docker build"]
+  D --> E["compose e2e"]
+  E --> M["Manager review → merge"]
+  M --> G["Build + push to GHCR"]
+  G --> K["Helm on kind / EKS"]
+  T["Terraform: validate + test only"] -.-> K
+</pre>
+  </div>
+  <div class="grid3">
+    <article class="card"><h3>Local</h3><p><code>make infra-up</code> starts Kafka (KRaft), Postgres+pgvector, Redis, Cassandra, Elasticsearch, RabbitMQ, LocalStack, Prometheus, Grafana, Kibana, n8n. <code>make up</code> adds the services, <code>make simulate</code> drives them.</p></article>
+    <article class="card"><h3>Kubernetes</h3><p>One Helm chart: Deployment, Service, ConfigMap, ServiceAccount per service, HPA for gateway and clinical-api, PDBs, NetworkPolicies. kind values for a laptop cluster. 59 helm-unittest cases, kubeconform strict.</p></article>
+    <article class="card"><h3>AWS (Terraform)</h3><p>Modules: VPC (+ S3/SQS endpoints), EKS, RDS, MSK, ElastiCache, SQS, S3, ECR, IAM. 36 <code>terraform test</code> cases with a mock provider. A LocalStack variant applies S3 and SQS locally. Never applied to real AWS.</p></article>
+    <article class="card"><h3>CI/CD</h3><p>GitHub Actions per service with path filters. Delivery adds image builds to GHCR, image scanning, tflint, compose end-to-end tests, a Jenkinsfile and a GitLab pipeline.</p></article>
+    <article class="card"><h3>Automation</h3><p>n8n workflow subscribes to critical notifications, waits, re-checks the alert, and escalates if still open.</p></article>
+    <article class="card"><h3>How it was built</h3><p>A manager agent wrote the contract and reviewed every PR; parallel worker agents built each service test-first in their own branches. Every merge was verified locally and, once enabled, in CI.</p></article>
+  </div>
+</section>
+
+<section id="screens">
+  <h2>Screens</h2>
+  <div class="shots">
+    <figure><img src="images/dashboard-ward-light.png" alt="Ward overview: 20 patient cards sorted by NEWS2, two high-risk patients at the top" loading="lazy" width="1440" height="900"><figcaption>Ward overview sorted by NEWS2. Sepsis scenario patient at the top with score 12.</figcaption></figure>
+    <figure><img src="images/dashboard-patient-dark.png" alt="Patient detail in dark mode: six vital charts trending toward deterioration and alert history" loading="lazy" width="1440" height="900"><figcaption>Patient detail: six vitals over an hour, normal bands shaded, alert history with acknowledgement.</figcaption></figure>
+    <figure><img src="images/dashboard-copilot-live.png" alt="Copilot panel answering with cited NEWS2 guideline chunks" loading="lazy" width="1440" height="900"><figcaption>Copilot against the real service: cited guideline chunks and token usage.</figcaption></figure>
+  </div>
+</section>
+
+<section id="tradeoffs">
+  <h2>Trade-offs &amp; known gaps</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Area</th><th>Decision or gap</th><th>Production answer</th></tr></thead>
+    <tbody>
+      <tr><td>End-user auth</td><td>Service keys and bearer tokens only; no clinician identity.</td><td>OIDC (Keycloak / Cognito), JWT at the edge, role-based ack, audit log per user.</td></tr>
+      <tr><td>Detection</td><td>Window results are collected to the driver each micro-batch to run detectors.</td><td>Move detectors into <code>mapGroupsWithState</code> / pandas UDFs so they scale with executors.</td></tr>
+      <tr><td>EWMA noise</td><td>|z| ≥ 3 alerts on ~0.3% of normal windows.</td><td>Require persistence (k of n windows), per-metric thresholds, clinician feedback loop.</td></tr>
+      <tr><td>Outbox</td><td>Failing rows retry forever; relay transaction spans sink calls.</td><td>Attempt counter + backoff + parking table; claim rows, commit, then call sinks.</td></tr>
+      <tr><td>Live feed</td><td>SSE has no replay on reconnect.</td><td>Honour <code>Last-Event-ID</code> by reading missed alerts from Postgres.</td></tr>
+      <tr><td>AWS auth</td><td>Terraform requires MSK IAM and Redis AUTH/TLS; services speak PLAINTEXT and <code>redis://</code>.</td><td>Add the MSK IAM SASL client and <code>rediss://</code> before any real deploy.</td></tr>
+      <tr><td>NEWS2 placement</td><td>Dashboard computes NEWS2 from latest vitals.</td><td>Serve the server score from clinical-api so every client agrees.</td></tr>
+      <tr><td>Exactly once</td><td>At-least-once transport, idempotent sinks.</td><td>Kafka transactions add cost and still stop at system edges; idempotency is the portable answer.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="skills">
+  <h2>CV skill map</h2>
+  <p class="sec-intro">Where each technology from the CV is exercised, so any interview question can point at real code.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Skill</th><th>Where in VitalStream</th></tr></thead>
+    <tbody>
+      <tr><td>Python · Java Spring Boot</td><td>Spark job, copilot, simulator · gateway, clinical-api</td></tr>
+      <tr><td>LLM · RAG · Vector DB</td><td>Pluggable Claude provider, chunker, pgvector HNSW + BM25 with RRF</td></tr>
+      <tr><td>MCP · n8n · agents</td><td>Copilot MCP server, n8n escalation workflow, LangGraph tool agent</td></tr>
+      <tr><td>Kubernetes · Docker</td><td>Multi-stage non-root images, Helm chart, kind cluster, HPA, PDB, NetworkPolicy</td></tr>
+      <tr><td>AWS EC2/ECS/EKS/RDS/ECR/SQS/Athena</td><td>Terraform EKS, RDS, ECR, SQS, MSK, ElastiCache; S3 Parquet partitions ready for Athena; LocalStack locally</td></tr>
+      <tr><td>SQL · NoSQL</td><td>Postgres (Flyway, outbox, pgvector) · Cassandra time series, Redis</td></tr>
+      <tr><td>Kafka · RabbitMQ (ActiveMQ-style queues)</td><td>Event backbone with DLQ · topic exchange routing by severity</td></tr>
+      <tr><td>Spark · Spark ML</td><td>Structured Streaming with watermarks · KMeans anomaly model</td></tr>
+      <tr><td>Elasticsearch · Redis</td><td>Alert search, BM25 · idempotency, rate limit, cache, pub/sub, detector state</td></tr>
+      <tr><td>Jenkins · GitHub Actions · GitLab</td><td>Per-service Actions, Jenkinsfile and GitLab pipeline from the delivery workstream</td></tr>
+      <tr><td>Streaming · high scale</td><td>Partitioned Kafka, stateless gateway, backpressure, measured 2,002 ev/s</td></tr>
+      <tr><td>HIPAA · FHIR · HL7</td><td>FHIR R4 and HL7 v2.5 ingestion, PHI-safe logging, access control, encryption in transit on AWS</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="qa">
+  <h2>Interview Q&amp;A</h2>
+  <details class="qa"><summary>How do you avoid duplicate alerts end to end?</summary><p>Three layers. The gateway drops duplicate event ids with <code>SET NX</code>. Spark derives alertId with uuid5 from patient, type, metric and window start, and a Redis ledger stops update mode from re-emitting the same alert each micro-batch. clinical-api inserts with <code>ON CONFLICT DO NOTHING</code>, so a redelivered alert creates no row and no outbox entries, which means no second notification.</p></details>
+  <details class="qa"><summary>Why the outbox instead of publishing to RabbitMQ right after the insert?</summary><p>Two writes to two systems cannot be atomic. If the process dies between them you either notify about an alert that does not exist or store one nobody hears about. The outbox puts the intent in the same transaction as the alert; a relay delivers it at least once, and sinks are idempotent by alertId.</p></details>
+  <details class="qa"><summary>What happens when a device clock is wrong?</summary><p>The gateway rejects readings more than 5 minutes in the future. The Spark job drops anything further ahead than the watermark delay, or older than 24 hours, before the watermark is computed, and counts the drops. Without that guard one bad clock advances the watermark and every later event is treated as late.</p></details>
+  <details class="qa"><summary>How would you scale to 100,000 beds?</summary><p>At one reading per vital per second that is about 600k events/s. Raise <code>vitals.raw</code> partitions (patientId keying keeps order), run more gateway replicas behind the HPA, and move detector logic off the driver into stateful grouped operations so Spark scales by executors. Cassandra scales horizontally with the day-bucketed key. Watch consumer lag and outbox lag as the scaling signals.</p></details>
+  <details class="qa"><summary>Why both pgvector and Elasticsearch for RAG?</summary><p>Embeddings catch paraphrases; BM25 catches exact clinical terms, drug names and codes that small embedders blur. RRF merges both rankings without score calibration, and chunks found by both rise to the top. Citations carry provenance so a clinician can check the source.</p></details>
+  <details class="qa"><summary>How do you stop the copilot from hallucinating numbers?</summary><p>It does not invent vitals: numbers come from tool calls against clinical-api, and NEWS2 comes from a deterministic tool. Guidance comes from retrieved, curated documents with citations. The agent is capped at 6 steps, and the default provider is a deterministic fake so tests are stable.</p></details>
+  <details class="qa"><summary>Two nurses acknowledge the same alert at once. What happens?</summary><p>Each request reads the alert and runs <code>UPDATE … WHERE id = ? AND version = ?</code>. Exactly one update matches; that request gets 200 with the new version. The other gets 409 problem+json, and the dashboard shows who acknowledged it.</p></details>
+  <details class="qa"><summary>What is a NetworkPolicy egress gap and why did it matter?</summary><p>Allowing egress to 0.0.0.0/0 also allows the cloud metadata endpoint and every pod in the cluster. A compromised pod could read node credentials or move sideways. The fix excludes private, link-local and cluster ranges, and turns internet egress off for services that do not need it. Combined with IMDSv2 hop limit 1, node credentials are out of reach.</p></details>
+  <details class="qa"><summary>What would you change first for production?</summary><p>Clinician identity through OIDC with role-based acknowledgement and an audit trail; bounded outbox retries with a parking table; SSE replay from Postgres; MSK IAM and TLS Redis in the services; detectors moved off the Spark driver.</p></details>
+</section>
+
+<p class="foot">VitalStream is a portfolio system with synthetic patients. It is not a medical device and its guidance is not clinical advice.</p>
+</main>
+</div>
