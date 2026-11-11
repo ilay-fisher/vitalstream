@@ -1,0 +1,32 @@
+# Simulator fragment (CONTRACTS 8). Paths are relative to the repo root (--project-directory .).
+# `make simulate` runs: docker compose ... run --rm simulator
+services:
+  simulator:
+    build:
+      context: tools/simulator
+      dockerfile: Dockerfile
+    image: vitalstream/simulator:local
+    # Not started by `make up` (zero replicas) but still listed by `compose config --services`,
+    # which the Makefile `simulate` target greps for. `compose run` ignores the replica count.
+    deploy:
+      replicas: 0
+    environment:
+      INGEST_GATEWAY_URL: http://ingest-gateway:8081
+      INGEST_API_KEY: ${INGEST_API_KEY:-dev-ingest-key}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SIM_SCENARIO: ${SIM_SCENARIO:-sepsis}
+      SIM_PATIENTS: ${SIM_PATIENTS:-5}
+      SIM_AFFECTED: ${SIM_AFFECTED:-2}
+      SIM_SPEED: ${SIM_SPEED:-10x}
+      SIM_TRANSPORT: ${SIM_TRANSPORT:-batch}
+      SIM_DURATION: ${SIM_DURATION:-300}
+    depends_on:
+      ingest-gateway:
+        condition: service_healthy
+    networks:
+      - vitalstream
+
+networks:
+  vitalstream:
+    name: vitalstream
+    external: false
