@@ -1,0 +1,12 @@
+{
+  "eventId": "00000000-0000-0000-0000-000000000003",
+  "patientId": "P-0001",
+  "deviceId": "DEV-ICU-0001",
+  "metric": "TEMPERATURE",
+  "value": 38.4,
+  "unit": "Cel",
+  "loinc": "8310-5",
+  "observedAt": "2026-11-11T20:15:30.123Z",
+  "ingestedAt": "2026-11-11T20:15:30.456Z",
+  "source": "HL7V2"
+}

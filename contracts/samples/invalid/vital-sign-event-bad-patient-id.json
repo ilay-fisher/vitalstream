@@ -1,0 +1,12 @@
+{
+  "eventId": "00000000-0000-0000-0000-000000000006",
+  "patientId": "patient-1",
+  "deviceId": "DEV-ICU-0001",
+  "metric": "HEART_RATE",
+  "value": 80.0,
+  "unit": "/min",
+  "loinc": "8867-4",
+  "observedAt": "2026-11-11T20:15:30.123Z",
+  "ingestedAt": "2026-11-11T20:15:30.456Z",
+  "source": "DEVICE_BATCH"
+}

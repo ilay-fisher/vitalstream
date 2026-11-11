@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vitalstream.local/schemas/device-batch.schema.json",
+  "title": "DeviceBatch",
+  "description": "Body of POST /api/v1/vitals/batch (CONTRACTS 4); max 500 readings.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "deviceId",
+    "patientId",
+    "readings"
+  ],
+  "properties": {
+    "deviceId": {
+      "type": "string",
+      "pattern": "^DEV-[A-Z]+-\\d{4,}$"
+    },
+    "patientId": {
+      "type": "string",
+      "pattern": "^P-\\d{4,}$"
+    },
+    "readings": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "eventId",
+          "metric",
+          "value",
+          "observedAt"
+        ],
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "metric": {
+            "enum": [
+              "HEART_RATE",
+              "SPO2",
+              "RESP_RATE",
+              "SYSTOLIC_BP",
+              "DIASTOLIC_BP",
+              "TEMPERATURE"
+            ]
+          },
+          "value": {
+            "type": "number"
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "Z$"
+          }
+        }
+      }
+    }
+  }
+}
