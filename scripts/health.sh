@@ -8,8 +8,10 @@ declare -a ROWS=()
 FAIL=0
 
 container_health() { # container -> healthy|unhealthy|starting|none|missing
-  docker inspect -f '{{if .State.Running}}{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}{{else}}stopped{{end}}' \
-    "vitalstream-$1" 2>/dev/null || echo missing
+  local out
+  out=$(docker inspect -f '{{if .State.Running}}{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}{{else}}stopped{{end}}' \
+    "vitalstream-$1" 2>/dev/null) || out=missing
+  echo "$out"
 }
 
 record() { # service status detail
@@ -119,7 +121,7 @@ for opt in "kibana|http://localhost:5601/api/status" "n8n|http://localhost:5678/
 done
 
 # One-shot init containers must have exited 0.
-for init in init-kafka init-postgres init-cassandra init-elasticsearch; do
+for init in init-kafka init-postgres init-cassandra init-elasticsearch init-rabbitmq; do
   code=$(docker inspect -f '{{.State.ExitCode}}' "vitalstream-$init" 2>/dev/null || echo missing)
   if [ "$code" = "0" ]; then record "$init" "OK" "exited 0"; else record "$init" "FAIL" "exit code: $code"; fi
 done

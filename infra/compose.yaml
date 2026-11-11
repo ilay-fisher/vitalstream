@@ -211,13 +211,23 @@ services:
     mem_limit: 512m
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
-      - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/90-vitalstream.conf:ro
-      - ./infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
     healthcheck:
       <<: *hc
       test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
       start_period: 30s
     networks: [vitalstream]
+
+  # definitions.json is imported through the management API (not load_definitions) so the default user from env still exists.
+  init-rabbitmq:
+    <<: *init
+    image: curlimages/curl:8.10.1
+    container_name: vitalstream-init-rabbitmq
+    environment:
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-vitalstream}
+    entrypoint: ["/bin/sh", "-c", "curl -sf -u vitalstream:$$RABBITMQ_PASSWORD -X POST -H 'Content-Type: application/json' --data-binary @/init/definitions.json http://rabbitmq:15672/api/definitions && echo rabbitmq definitions imported"]
+    volumes: ["./infra/rabbitmq/definitions.json:/init/definitions.json:ro"]
+    depends_on:
+      rabbitmq: {condition: service_healthy}
 
   # ---------------------------------------------------------------- LocalStack (S3, SQS; init hook creates resources)
   localstack:
@@ -236,7 +246,7 @@ services:
       - ./infra/localstack/init.sh:/etc/localstack/init/ready.d/10-init.sh:ro
     healthcheck:
       <<: *hc
-      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/init/ready | grep -q '\"READY\": true'"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/init/ready | grep -q '\"completed\": true'"]
       start_period: 20s
     networks: [vitalstream]
 

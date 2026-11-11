@@ -18,7 +18,13 @@ fragments: ## Show discovered component compose fragments
 	@echo "$(if $(FRAGMENTS),$(FRAGMENTS),(none))"
 
 infra-up: ## Start infrastructure and run idempotent init (PROFILES=tools adds Kibana + n8n)
-	$(COMPOSE_BASE) $(PROFILE_FLAGS) up -d --wait --wait-timeout 420
+	$(COMPOSE_BASE) $(PROFILE_FLAGS) up -d
+	@# --wait treats the exiting one-shot init containers as failures, so wait on long-running services only.
+	$(COMPOSE_BASE) $(PROFILE_FLAGS) up -d --wait --wait-timeout 420 $$($(COMPOSE_BASE) $(PROFILE_FLAGS) config --services | grep -v '^init-')
+	@for c in $$($(COMPOSE_BASE) $(PROFILE_FLAGS) config --services | grep '^init-'); do \
+		rc=$$(docker wait vitalstream-$$c); \
+		[ "$$rc" = "0" ] && echo "$$c: done" || { echo "$$c failed (exit $$rc)"; docker logs vitalstream-$$c; exit 1; }; \
+	done
 
 infra-down: ## Stop infrastructure (volumes kept)
 	$(COMPOSE_BASE) --profile tools down --remove-orphans
