@@ -127,6 +127,7 @@ Security (CONTRACTS §4.1): every `/mcp` request needs `Authorization: Bearer $M
 | `ELASTICSEARCH_URL` | `http://localhost:9200` | BM25 index `guidelines` (`ES_INDEX`) |
 | `CLINICAL_API_URL` | `http://localhost:8082` | vitals and alerts |
 | `COPILOT_ADMIN_TOKEN` / `MCP_TOKEN` | `dev-admin-token` / `dev-mcp-token` | bearer tokens (constant-time compare); override outside local dev |
+| `APP_ENV` | `dev` | anything else makes startup fail if the admin/MCP tokens, pseudonym key or DB password are empty, dev defaults or < 32 chars; `dev` logs one WARN "running with dev secrets" |
 | `LOG_PSEUDONYM_KEY` | `dev-only-pseudonym-key` | HMAC key for `patientRef` in logs (raw patient ids are never logged) |
 | `LLM_PROVIDER` | `fake` | `fake` or `anthropic` |
 | `ANTHROPIC_API_KEY` | empty | required for `anthropic` |

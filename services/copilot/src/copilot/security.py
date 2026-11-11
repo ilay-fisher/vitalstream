@@ -8,7 +8,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 def bearer_matches(header: str | None, expected: str) -> bool:
     """True when ``header`` is `Bearer <expected>`; compares in constant time."""
-    if not header:
+    if not header or not expected:
         return False
     scheme, _, token = header.partition(" ")
     ok_scheme = hmac.compare_digest(scheme.lower().encode(), b"bearer")

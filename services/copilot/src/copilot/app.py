@@ -33,7 +33,10 @@ def _problem(status: int, title: str, detail: str, **extra: Any) -> JSONResponse
 def create_app(settings: Settings | None = None, services: Services | None = None) -> FastAPI:
     """Build the app. Tests inject ``services``; production builds them in the lifespan."""
     settings = settings or get_settings()
+    settings.validate_secrets()
     configure_logging(settings.service_name, settings.log_level)
+    if settings.app_env == "dev":
+        log.warning("running with dev secrets")
     mcp = build_mcp(lambda: app.state.services.tools, settings.mcp_host_list)
 
     @asynccontextmanager

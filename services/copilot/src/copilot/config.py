@@ -3,10 +3,12 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_MIN_SECRET_LENGTH = 32
 _DEFAULT_CORPUS = Path(__file__).resolve().parents[2] / "corpus"
 
 
@@ -15,6 +17,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=None, extra="ignore", case_sensitive=False)
 
+    app_env: str = "dev"
     service_name: str = "copilot"
     log_level: str = "INFO"
     port: int = 8083
@@ -62,6 +65,34 @@ class Settings(BaseSettings):
             if url.startswith(prefix):
                 return "postgresql+asyncpg://" + url[len(prefix) :]
         return url
+
+    def validate_secrets(self) -> None:
+        """Fail fast outside dev when a secret is empty, a dev default or shorter than 32 chars.
+
+        The error names the offending settings, never their values.
+        """
+        if self.app_env == "dev":
+            return
+        db_password = urlsplit(self.postgres_url).password or ""
+        candidates = {
+            "COPILOT_ADMIN_TOKEN": (self.copilot_admin_token.get_secret_value(), "dev-admin-token"),
+            "MCP_TOKEN": (self.mcp_token.get_secret_value(), "dev-mcp-token"),
+            "LOG_PSEUDONYM_KEY": (
+                self.log_pseudonym_key.get_secret_value(),
+                "dev-only-pseudonym-key",
+            ),
+            "database password (POSTGRES_URL)": (db_password, "vitalstream"),
+        }
+        weak = [
+            name
+            for name, (value, dev_default) in candidates.items()
+            if len(value) < _MIN_SECRET_LENGTH or value == dev_default
+        ]
+        if weak:
+            raise ValueError(
+                f"APP_ENV={self.app_env}: refusing to start with weak secrets "
+                f"(empty, dev default or < {_MIN_SECRET_LENGTH} chars): {', '.join(weak)}"
+            )
 
     @property
     def mcp_host_list(self) -> list[str]:
