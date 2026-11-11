@@ -1,0 +1,58 @@
+server:
+  port: ${SERVER_PORT:8081}
+  shutdown: graceful
+
+spring:
+  application:
+    name: ingest-gateway
+  mvc:
+    problemdetails:
+      enabled: true
+  data:
+    redis:
+      url: ${REDIS_URL:redis://localhost:6379}
+      timeout: 500ms
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        linger.ms: 5
+        # Fail a request quickly instead of hanging when the broker is unreachable.
+        max.block.ms: 5000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      service: ingest-gateway
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+app:
+  env: ${APP_ENV:dev}
+
+ingest:
+  allowed-hosts: ${ALLOWED_HOSTS:localhost,localhost:8081,127.0.0.1,127.0.0.1:8081,ingest-gateway,ingest-gateway:8081}
+  api-key: ${INGEST_API_KEY:dev-ingest-key}
+  log-pseudonym-key: ${LOG_PSEUDONYM_KEY:dev-only-pseudonym-key}
+  topic: ${INGEST_TOPIC:vitals.raw}
+  idempotency-ttl: ${INGEST_IDEMPOTENCY_TTL:24h}
+  rate-limit:
+    rate-per-second: ${INGEST_RATE_LIMIT_PER_SECOND:50}
+    burst: ${INGEST_RATE_LIMIT_BURST:100}
