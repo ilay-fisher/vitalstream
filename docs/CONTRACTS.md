@@ -20,7 +20,8 @@ Machine-readable copies live in `contracts/` (JSON Schema + sample payloads), cr
 | Kibana | 5601 | compose profile `tools` |
 | RabbitMQ | 5672 / 15672 | user/pass `vitalstream`/`vitalstream` |
 | LocalStack (S3, SQS) | 4566 | region `us-east-1` |
-| Spark UI | 4040 | |
+| Spark UI | 4040 | Spark metrics at `/metrics/prometheus/` |
+| stream-processor metrics/health | 9404 | business counters `/metrics`, `/health` (Prometheus scrapes both 4040 and 9404) |
 | Prometheus | 9090 | |
 | Grafana | 3001 | admin/admin |
 | n8n | 5678 | compose profile `tools` |
@@ -99,7 +100,7 @@ Retention: `vitals.raw` 7 days, `alerts.*` 30 days. Replication factor 1 locally
 
 | Field | Type | Rules |
 |---|---|---|
-| alertId | UUID | deterministic: UUIDv5 of `patientId|type|metric|windowStart` (lets consumers dedupe replays) |
+| alertId | UUID | deterministic: `uuid5(NAMESPACE_URL, "patientId|type|metric|windowStart")` (RFC 4122 URL namespace `6ba7b811-9dad-11d1-80b4-00c04fd430c8`; metric = empty string when null; windowStart ISO-8601 UTC). Lets consumers dedupe replays and recompute ids |
 | type | enum | `THRESHOLD`, `TREND_ZSCORE`, `NEWS2`, `ML_ANOMALY` |
 | severity | enum | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
 | metric / value | nullable | set for THRESHOLD and TREND_ZSCORE |
@@ -185,7 +186,8 @@ CREATE TABLE vitals_by_minute (patient_id text, metric text, day date, window_st
 | `idem:{eventId}` | string | 24 h | ingest-gateway |
 | `rl:{deviceId}` | hash (token bucket, Lua script) | 10 s | ingest-gateway |
 | `patient:{patientId}:latest` | hash metric → JSON `{value,unit,observedAt}` | 1 h | stream-processor |
-| `ewma:{patientId}:{metric}` | hash `mean,var,n` | 24 h | stream-processor |
+| `ewma:{patientId}:{metric}` | hash `mean,var,n,ts` (`ts` = last applied observedAt, makes replays idempotent) | 24 h | stream-processor |
+| `alert:emitted:{alertId}` | string (last emitted severity) | 15 min | stream-processor – stops update-mode windows re-emitting the same alert each micro-batch; severity escalations pass |
 | `alert:suppress:{patientId}:{type}:{metric}` | string | 5 min | clinical-api |
 | `cache:vitals:{patientId}:{hash(query)}` | string JSON | 10 s | clinical-api |
 
