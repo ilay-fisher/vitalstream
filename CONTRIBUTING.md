@@ -62,6 +62,8 @@ Commit history should show tests landing with or before the code they cover.
   export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
   export TESTCONTAINERS_HOST_OVERRIDE=$(colima ls -j | python3 -c 'import sys,json;print(json.load(sys.stdin).get("address") or "127.0.0.1")')
   ```
+- PATH first: `export PATH=/opt/homebrew/opt/openjdk@21/bin:/opt/homebrew/bin:$PATH` (native arm64 `gh`/`git`; `/usr/local/bin/gh` is a broken x86 build).
 - Java 21: `export JAVA_HOME=/opt/homebrew/opt/openjdk@21`. Use the Maven wrapper (`./mvnw`).
+- Ad-hoc manual runs while other workers run in parallel: start only the containers you need, named `<workstream>-<svc>`, on your host port block (foundation: real ports from CONTRACTS; ingest-gateway 21xxx; stream-processor 22xxx; clinical-api 23xxx; copilot 24xxx; simulator/dashboard 25xxx). Remove them when done.
 - Python: use `uv` for env and dependency management.
 - Docker memory is shared by parallel workers: cap heaps (ES `-Xms512m -Xmx512m`, Cassandra `MAX_HEAP_SIZE=1G`), and stop your containers when done.
