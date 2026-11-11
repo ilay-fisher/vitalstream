@@ -120,13 +120,43 @@ def test_jenkinsfile_declares_stages_in_order_with_balanced_braces():
 
 
 @pytest.mark.parametrize("workflow", ["ci.yml", "release.yml"])
-def test_trivy_ignore_policy_exists_and_is_time_boxed(workflow):
-    text = (REPO / ".github/workflows" / workflow).read_text()
-    policy = REPO / "e2e/ci/trivy-ignore.rego"
+def test_trivy_scans_vulnerabilities_and_secrets_before_any_push(workflow):
+    doc = load_yaml(f".github/workflows/{workflow}")
+    job = next(iter(doc["jobs"].values()))
+    names = [s.get("name", "") for s in job["steps"]]
+    trivy = next(s for s in job["steps"] if "trivy" in s.get("uses", ""))
 
-    assert "TRIVY_IGNORE_POLICY: e2e/ci/trivy-ignore.rego" in text
-    assert policy.exists()
-    assert "time.now_ns() < EXPIRES" in policy.read_text()
+    assert trivy["with"]["scanners"] == "vuln,secret"
+    assert trivy["with"]["exit-code"] == "1"
+    assert trivy["env"]["TRIVY_SECRET_CONFIG"] == "e2e/ci/trivy-secret.yaml"
+    scan = job["steps"].index(trivy)
+    pushes = [i for i, s in enumerate(job["steps"]) if s.get("with", {}).get("push") is True]
+    assert pushes and all(scan < i for i in pushes), names
+
+
+@pytest.mark.parametrize("workflow", ["ci.yml", "release.yml"])
+def test_trivy_ignore_policy_is_per_service_and_time_boxed(workflow):
+    text = (REPO / ".github/workflows" / workflow).read_text()
+
+    assert "TRIVY_IGNORE_POLICY: e2e/ci/trivy-ignore-${{ matrix.service }}.rego" in text
+    for service in SERVICES:
+        policy = (REPO / f"e2e/ci/trivy-ignore-{service}.rego").read_text()
+        assert "package trivy" in policy
+        assert "PkgName ==" not in policy and "input.PkgName in" not in policy, service
+        for rule in policy.split("ignore if {")[1:]:
+            assert "time.now_ns() < " in rule, f"{service}: ignore rule without expiry"
+            assert "# Reason:" in policy and "# Review:" in policy, service
+    assert not (REPO / "e2e/ci/trivy-ignore.rego").exists()
+
+
+def test_trivy_secret_allowlist_is_scoped_to_one_path():
+    config = yaml.safe_load((REPO / "e2e/ci/trivy-secret.yaml").read_text())
+
+    rules = config["allow-rules"]
+    assert rules
+    for rule in rules:
+        assert rule["path"] and rule["path"] != ".*"
+        assert "id" not in rule or rule["description"]
 
 
 def n8n_workflow() -> dict:
