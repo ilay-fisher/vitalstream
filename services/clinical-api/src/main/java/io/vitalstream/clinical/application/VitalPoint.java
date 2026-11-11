@@ -9,7 +9,7 @@ import java.time.Instant;
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record VitalPoint(
-    Instant timestamp,
+    Instant observedAt,
     String metric,
     Double value,
     String unit,

@@ -221,6 +221,8 @@ class ApiControllersTest {
     mvc.perform(get("/api/v1/patients/P-0001/vitals"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.points[0].metric").value("SPO2"))
+        .andExpect(jsonPath("$.points[0].observedAt").value("2026-11-11T20:00:00Z"))
+        .andExpect(jsonPath("$.points[0].timestamp").doesNotExist())
         .andExpect(jsonPath("$.points[0].min").doesNotExist());
 
     ArgumentCaptor<VitalsQuery> query = ArgumentCaptor.forClass(VitalsQuery.class);

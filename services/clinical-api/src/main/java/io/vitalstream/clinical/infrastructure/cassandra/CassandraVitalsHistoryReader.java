@@ -47,7 +47,7 @@ public class CassandraVitalsHistoryReader implements VitalsHistoryReader {
         query.resolution() == VitalsQuery.Resolution.RAW
             ? readRaw(session, query)
             : readMinute(session, query);
-    points.sort(Comparator.comparing(VitalPoint::timestamp).thenComparing(VitalPoint::metric));
+    points.sort(Comparator.comparing(VitalPoint::observedAt).thenComparing(VitalPoint::metric));
     return points.size() > MAX_POINTS
         ? points.subList(points.size() - MAX_POINTS, points.size())
         : points;

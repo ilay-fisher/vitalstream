@@ -82,11 +82,11 @@ is `GET /api/v1/alerts?q=...`, and acknowledgement is `POST` (CONTRACTS section 
 
 ```json
 {"patientId":"P-0001","resolution":"RAW","from":"2026-11-11T20:00:00Z","to":"2026-11-11T21:00:00Z",
- "points":[{"timestamp":"2026-11-11T20:15:30Z","metric":"HEART_RATE","value":101.0,"unit":"/min","deviceId":"DEV-ICU-0001"}]}
+ "points":[{"observedAt":"2026-11-11T20:15:30Z","metric":"HEART_RATE","value":101.0,"unit":"/min","deviceId":"DEV-ICU-0001"}]}
 ```
 
 With `resolution=minute` the response has `"resolution":"MINUTE"` and points are
-`{"timestamp":"<window start>","metric":"HEART_RATE","min":98.0,"max":104.0,"avg":101.0,"count":12}`.
+`{"observedAt":"<window start>","metric":"HEART_RATE","min":98.0,"max":104.0,"avg":101.0,"count":12}`.
 
 `GET /api/v1/alerts?patientId=&severity=&status=&q=&page=0&size=20` (size 1..100, newest first):
 
