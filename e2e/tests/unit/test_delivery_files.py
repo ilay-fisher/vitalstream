@@ -119,6 +119,16 @@ def test_jenkinsfile_declares_stages_in_order_with_balanced_braces():
         assert f"stage('{service}')" in text
 
 
+@pytest.mark.parametrize("workflow", ["ci.yml", "release.yml"])
+def test_trivy_ignore_policy_exists_and_is_time_boxed(workflow):
+    text = (REPO / ".github/workflows" / workflow).read_text()
+    policy = REPO / "e2e/ci/trivy-ignore.rego"
+
+    assert "TRIVY_IGNORE_POLICY: e2e/ci/trivy-ignore.rego" in text
+    assert policy.exists()
+    assert "time.now_ns() < EXPIRES" in policy.read_text()
+
+
 def n8n_workflow() -> dict:
     return json.loads((REPO / "infra/n8n/critical-alert-escalation.json").read_text())[0]
 
