@@ -9,6 +9,9 @@ server {
   add_header Referrer-Policy no-referrer always;
   add_header Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'" always;
 
+  # Upstreams are resolved per request (variables), so the dashboard starts even when a backend is down.
+  resolver ${DNS_RESOLVER} valid=10s;
+
   location = /healthz {
     access_log off;
     default_type text/plain;
@@ -18,7 +21,9 @@ server {
   # Same-origin API prefixes (no CORS): the SPA calls /clinical-api/* and /copilot-api/*.
   # Streaming endpoints (SSE) must not be buffered or cut by the default read timeout.
   location /clinical-api/ {
-    proxy_pass ${CLINICAL_API_URL}/;
+    set $upstream_clinical_api_url ${CLINICAL_API_URL};
+    rewrite ^/clinical-api/(.*)$ /$1 break;
+    proxy_pass $upstream_clinical_api_url;
     proxy_set_header Host $proxy_host;
     proxy_set_header X-Correlation-Id $http_x_correlation_id;
     proxy_http_version 1.1;
@@ -28,7 +33,9 @@ server {
   }
 
   location /copilot-api/ {
-    proxy_pass ${COPILOT_URL}/;
+    set $upstream_copilot_url ${COPILOT_URL};
+    rewrite ^/copilot-api/(.*)$ /$1 break;
+    proxy_pass $upstream_copilot_url;
     proxy_set_header Host $proxy_host;
     proxy_set_header X-Correlation-Id $http_x_correlation_id;
     proxy_http_version 1.1;

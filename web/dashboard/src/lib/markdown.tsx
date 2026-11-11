@@ -43,6 +43,40 @@ export function renderInline(text: string, onCitation?: (index: number) => void)
   return nodes;
 }
 
+type Block =
+  | { kind: 'p'; lines: string[] }
+  | { kind: 'ul' | 'ol'; items: string[] }
+  | { kind: 'h'; text: string };
+
+const BULLET = /^\s*[-*]\s+/;
+const NUMBER = /^\s*\d+[.)]\s+/;
+
+/** Splits text into blocks line by line, so a list directly after a sentence is still a list. */
+export function parseBlocks(text: string): Block[] {
+  const blocks: Block[] = [];
+  for (const line of text.split('\n')) {
+    if (line.trim() === '') {
+      blocks.push({ kind: 'p', lines: [] });
+      continue;
+    }
+    const last = blocks[blocks.length - 1];
+    const heading = /^#{1,4}\s+(.*)$/.exec(line);
+    if (heading) {
+      blocks.push({ kind: 'h', text: heading[1] });
+    } else if (BULLET.test(line) || NUMBER.test(line)) {
+      const kind = BULLET.test(line) ? 'ul' : 'ol';
+      const item = line.replace(kind === 'ul' ? BULLET : NUMBER, '');
+      if (last && last.kind === kind) last.items.push(item);
+      else blocks.push({ kind, items: [item] });
+    } else if (last && last.kind === 'p') {
+      last.lines.push(line);
+    } else {
+      blocks.push({ kind: 'p', lines: [line] });
+    }
+  }
+  return blocks.filter((b) => b.kind !== 'p' || b.lines.length > 0);
+}
+
 export function Markdown({
   text,
   onCitation,
@@ -50,42 +84,29 @@ export function Markdown({
   text: string;
   onCitation?: (index: number) => void;
 }) {
-  const blocks = text.split(/\n{2,}/).filter((b) => b.trim() !== '');
   return (
     <>
-      {blocks.map((block, i) => {
-        const lines = block.split('\n');
-        if (lines.every((l) => /^\s*[-*]\s+/.test(l))) {
+      {parseBlocks(text).map((block, i) => {
+        if (block.kind === 'h') return <h4 key={i}>{renderInline(block.text, onCitation)}</h4>;
+        if (block.kind === 'p') {
           return (
-            <ul key={i}>
-              {lines.map((l, j) => (
-                <li key={j}>{renderInline(l.replace(/^\s*[-*]\s+/, ''), onCitation)}</li>
+            <p key={i}>
+              {block.lines.map((l, j) => (
+                <Fragment key={j}>
+                  {j > 0 && <br />}
+                  {renderInline(l, onCitation)}
+                </Fragment>
               ))}
-            </ul>
+            </p>
           );
         }
-        if (lines.every((l) => /^\s*\d+[.)]\s+/.test(l))) {
-          return (
-            <ol key={i}>
-              {lines.map((l, j) => (
-                <li key={j}>{renderInline(l.replace(/^\s*\d+[.)]\s+/, ''), onCitation)}</li>
-              ))}
-            </ol>
-          );
-        }
-        const heading = /^#{1,4}\s+(.*)$/.exec(lines[0]);
-        if (heading && lines.length === 1) {
-          return <h4 key={i}>{renderInline(heading[1], onCitation)}</h4>;
-        }
+        const List = block.kind;
         return (
-          <p key={i}>
-            {lines.map((l, j) => (
-              <Fragment key={j}>
-                {j > 0 && <br />}
-                {renderInline(l, onCitation)}
-              </Fragment>
+          <List key={i}>
+            {block.items.map((item, j) => (
+              <li key={j}>{renderInline(item, onCitation)}</li>
             ))}
-          </p>
+          </List>
         );
       })}
     </>

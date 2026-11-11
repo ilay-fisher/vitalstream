@@ -33,6 +33,14 @@ describe('Markdown', () => {
     expect(onCitation).toHaveBeenCalledWith(1);
   });
 
+  it('treats a list right after a sentence as a list', () => {
+    const { container } = render(
+      <Markdown text={'Guidelines:\n- [1] first\n- [2] second\nDone.'} />,
+    );
+    expect(container.querySelectorAll('ul li')).toHaveLength(2);
+    expect(container.querySelectorAll('p')).toHaveLength(2);
+  });
+
   it('keeps single line breaks inside a paragraph', () => {
     const { container } = render(<Markdown text={'a\nb'} />);
     expect(container.querySelector('br')).not.toBeNull();

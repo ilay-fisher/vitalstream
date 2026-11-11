@@ -23,7 +23,7 @@ export default defineConfig({
     },
     {
       name: 'screenshots',
-      testMatch: /screenshots\.shots\.ts/,
+      testMatch: /.*\.shots\.ts/,
       workers: 1,
       use: { ...devices['Desktop Chrome'] },
     },
