@@ -1,0 +1,13 @@
+{
+  "resourceType": "Observation",
+  "id": "9f1c2a1e-8d0b-4c11-9a77-3f0c2b9e1d10",
+  "status": "final",
+  "code": {"coding": [{"system": "http://loinc.org", "code": "85354-9", "display": "Blood pressure panel"}]},
+  "subject": {"reference": "Patient/P-0001"},
+  "device": {"reference": "Device/DEV-ICU-0001"},
+  "effectiveDateTime": "2026-11-11T22:15:30+02:00",
+  "component": [
+    {"code": {"coding": [{"system": "http://loinc.org", "code": "8480-6"}]}, "valueQuantity": {"value": 120, "unit": "mmHg", "system": "http://unitsofmeasure.org", "code": "mm[Hg]"}},
+    {"code": {"coding": [{"system": "http://loinc.org", "code": "8462-4"}]}, "valueQuantity": {"value": 80, "unit": "mmHg", "system": "http://unitsofmeasure.org", "code": "mm[Hg]"}}
+  ]
+}
