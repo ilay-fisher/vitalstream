@@ -38,7 +38,7 @@ async def app(stack: dict[str, Any]) -> AsyncIterator[FastAPI]:
 @pytest.fixture
 async def client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost"
     ) as c:
         yield c
 
@@ -67,7 +67,7 @@ async def test_chat_streams_documented_sse_events(
     mock_clinical(clinical_mock)
     response = await client.post(
         "/api/v1/chat",
-        json={"sessionId": "s1", "message": "Is P-0001 deteriorating?"},
+        json={"message": "Is P-0001 deteriorating?"},
         headers={"X-Correlation-Id": "corr-chat-1"},
     )
     assert response.status_code == 200
@@ -76,11 +76,13 @@ async def test_chat_streams_documented_sse_events(
 
     events = parse_sse(response.text)
     names = [name for name, _ in events]
-    assert set(names) == {"token", "tool_call", "citation", "done"}
+    assert set(names) == {"session", "token", "tool_call", "citation", "done"}
+    assert names[0] == "session"
     assert names[-1] == "done"
     assert names.index("tool_call") < names.index("citation") < names.index("token")
     done = events[-1][1]
-    assert done["sessionId"] == "s1"
+    assert done["sessionId"] == events[0][1]["sessionId"]
+    assert len(done["sessionId"]) == 32
     assert done["correlationId"] == "corr-chat-1"
     assert done["text"] == "".join(d["text"] for n, d in events if n == "token")
     citation = next(d for n, d in events if n == "citation")
@@ -93,7 +95,7 @@ async def test_correlation_id_is_forwarded_to_clinical_api(
     route = mock_clinical(clinical_mock)
     await client.post(
         "/api/v1/chat",
-        json={"sessionId": "s2", "patientId": "P-0001", "message": "status?"},
+        json={"patientId": "P-0001", "message": "status?"},
         headers={"X-Correlation-Id": "corr-fwd-9"},
     )
     assert route.calls.last.request.headers["X-Correlation-Id"] == "corr-fwd-9"
@@ -103,14 +105,16 @@ async def test_session_memory_carries_patient_between_turns(
     client: httpx.AsyncClient, clinical_mock: respx.MockRouter
 ) -> None:
     mock_clinical(clinical_mock)
-    await client.post("/api/v1/chat", json={"sessionId": "mem", "message": "Check P-0001"})
-    second = await client.post("/api/v1/chat", json={"sessionId": "mem", "message": "and now?"})
+    first = await client.post("/api/v1/chat", json={"message": "Check P-0001"})
+    sid = parse_sse(first.text)[0][1]["sessionId"]
+    second = await client.post("/api/v1/chat", json={"sessionId": sid, "message": "and now?"})
+    assert parse_sse(second.text)[0][1]["sessionId"] == sid
     calls = [d for n, d in parse_sse(second.text) if n == "tool_call" and d["status"] == "running"]
     assert calls[0]["arguments"]["patient_id"] == "P-0001"
 
 
 async def test_chat_validates_request_with_problem_json(client: httpx.AsyncClient) -> None:
-    response = await client.post("/api/v1/chat", json={"sessionId": "s", "patientId": "bad"})
+    response = await client.post("/api/v1/chat", json={"patientId": "bad"})
     assert response.status_code == 422
     assert response.headers["content-type"].startswith("application/problem+json")
     body = response.json()
@@ -126,12 +130,12 @@ async def test_chat_failure_ends_stream_with_error_done(stack: dict[str, Any]) -
 
     application = create_app(Settings(), make_services(stack, agent=Exploding()))
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=application), base_url="http://t"
+        transport=httpx.ASGITransport(app=application), base_url="http://localhost"
     ) as c:
-        response = await c.post("/api/v1/chat", json={"sessionId": "x", "message": "hi"})
+        response = await c.post("/api/v1/chat", json={"message": "hi"})
     events = parse_sse(response.text)
-    assert events == [("done", {**events[0][1]})]
-    assert events[0][1]["error"] is True
+    assert [n for n, _ in events] == ["session", "done"]
+    assert events[1][1]["error"] is True
 
 
 async def test_ingest_document_then_find_it_via_search(client: httpx.AsyncClient) -> None:
@@ -190,7 +194,7 @@ async def test_health_reports_up_and_degraded_and_down(stack: dict[str, Any]) ->
             make_services(stack, health_checks=checks, critical_checks=frozenset({"pg"})),
         )
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=application), base_url="http://t"
+            transport=httpx.ASGITransport(app=application), base_url="http://localhost"
         ) as c:
             r = await c.get("/health")
         return r.status_code, r.json()
@@ -206,9 +210,7 @@ async def test_metrics_exposes_business_counters(
     client: httpx.AsyncClient, clinical_mock: respx.MockRouter
 ) -> None:
     mock_clinical(clinical_mock)
-    await client.post(
-        "/api/v1/chat", json={"sessionId": "m", "message": "Is P-0001 deteriorating?"}
-    )
+    await client.post("/api/v1/chat", json={"message": "Is P-0001 deteriorating?"})
     text = (await client.get("/metrics")).text
     assert 'copilot_chat_requests_total{status="ok"}' in text
     assert 'copilot_tool_calls_total{status="ok",tool="get_patient_vitals"}' in text

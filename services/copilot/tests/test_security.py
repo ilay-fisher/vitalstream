@@ -212,7 +212,7 @@ async def test_logs_use_patient_ref_never_raw_patient_id(
     async with await _client(stack) as c:
         await c.post(
             "/api/v1/chat",
-            json={"sessionId": "s", "message": "Is P-0001 ok?", "patientId": "P-0001"},
+            json={"message": "Is P-0001 ok?", "patientId": "P-0001"},
         )
     out = capsys.readouterr().out
     assert "P-0001" not in out

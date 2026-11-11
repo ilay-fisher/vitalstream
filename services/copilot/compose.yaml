@@ -20,6 +20,7 @@ services:
       COPILOT_ADMIN_TOKEN: ${COPILOT_ADMIN_TOKEN:-dev-admin-token}
       MCP_TOKEN: ${MCP_TOKEN:-dev-mcp-token}
       LOG_PSEUDONYM_KEY: ${LOG_PSEUDONYM_KEY:-dev-only-pseudonym-key}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,copilot}
       APP_ENV: ${APP_ENV:-dev}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:

@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     copilot_admin_token: SecretStr = SecretStr("dev-admin-token")
     mcp_token: SecretStr = SecretStr("dev-mcp-token")
     log_pseudonym_key: SecretStr = SecretStr("dev-only-pseudonym-key")
+    allowed_hosts: str = "localhost,127.0.0.1,copilot"
     mcp_allowed_hosts: str = "localhost:8083,127.0.0.1:8083,copilot:8083"
 
     llm_provider: Literal["fake", "anthropic"] = "fake"
@@ -93,6 +94,11 @@ class Settings(BaseSettings):
                 f"APP_ENV={self.app_env}: refusing to start with weak secrets "
                 f"(empty, dev default or < {_MIN_SECRET_LENGTH} chars): {', '.join(weak)}"
             )
+
+    @property
+    def allowed_host_list(self) -> list[str]:
+        """Hostnames accepted in the Host header (ports ignored, as Starlette compares names)."""
+        return [h.strip().split(":")[0] for h in self.allowed_hosts.split(",") if h.strip()]
 
     @property
     def mcp_host_list(self) -> list[str]:

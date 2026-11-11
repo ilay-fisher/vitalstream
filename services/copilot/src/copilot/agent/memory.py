@@ -1,5 +1,6 @@
 """In-memory per-session conversation memory with a TTL and hard size bounds."""
 
+import secrets
 import time
 from collections import OrderedDict
 from collections.abc import Callable
@@ -32,6 +33,17 @@ class ConversationMemory:
     def __len__(self) -> int:
         self._purge()
         return len(self._sessions)
+
+    def create(self) -> str:
+        """Issue a new unguessable (128-bit) session id and register it."""
+        session_id = secrets.token_hex(16)
+        self.append(session_id, [])
+        return session_id
+
+    def has(self, session_id: str) -> bool:
+        """True only for ids this memory issued that have not expired or been evicted."""
+        self._purge()
+        return session_id in self._sessions
 
     def get(self, session_id: str) -> list[Message]:
         """A copy of the session history (empty if unknown or expired)."""

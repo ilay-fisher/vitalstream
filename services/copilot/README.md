@@ -27,13 +27,15 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy --strict src
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/api/v1/chat` | `{"sessionId","patientId"?,"message"}` -> SSE: `token`, `tool_call`, `citation`, `done` |
+| POST | `/api/v1/chat` | `{"sessionId"?,"patientId"?,"message"}` -> SSE: `session`, `token`, `tool_call`, `citation`, `done` |
 | POST | `/api/v1/documents` | **Bearer `COPILOT_ADMIN_TOKEN`**. `{"documents":[{"title"?,"source"?,"content"}]}` markdown -> 201; stored with provenance `api-upload` |
 | GET | `/api/v1/documents/search?q=&k=` | hybrid search debug view incl. per-side ranks |
 | POST | `/mcp` | **Bearer `MCP_TOKEN`**; MCP streamable HTTP (stateless, JSON responses) |
 | GET | `/health`, `/metrics`, `/docs` | health (503 if Postgres is down), Prometheus, OpenAPI |
 
 SSE events (`event:` line + one-line JSON `data:`):
+
+* `session` `{"sessionId"}` - always first. The server issues a random 128-bit id and only accepts ids it issued that have not expired; unknown ids get a new session (never adopted).
 
 * `token` `{"text"}` - answer fragments.
 * `tool_call` `{"id","name","arguments","status":"running"|"ok"|"error","durationMs"?,"error"?}` - emitted when a tool starts and again when it finishes.
@@ -127,6 +129,7 @@ Security (CONTRACTS §4.1): every `/mcp` request needs `Authorization: Bearer $M
 | `ELASTICSEARCH_URL` | `http://localhost:9200` | BM25 index `guidelines` (`ES_INDEX`) |
 | `CLINICAL_API_URL` | `http://localhost:8082` | vitals and alerts |
 | `COPILOT_ADMIN_TOKEN` / `MCP_TOKEN` | `dev-admin-token` / `dev-mcp-token` | bearer tokens (constant-time compare); override outside local dev |
+| `ALLOWED_HOSTS` | `localhost,127.0.0.1,copilot` | Host-header allowlist on every route (400 otherwise) |
 | `APP_ENV` | `dev` | anything else makes startup fail if the admin/MCP tokens, pseudonym key or DB password are empty, dev defaults or < 32 chars; `dev` logs one WARN "running with dev secrets" |
 | `LOG_PSEUDONYM_KEY` | `dev-only-pseudonym-key` | HMAC key for `patientRef` in logs (raw patient ids are never logged) |
 | `LLM_PROVIDER` | `fake` | `fake` or `anthropic` |
@@ -141,6 +144,9 @@ Security (CONTRACTS §4.1): every `/mcp` request needs `Authorization: Bearer $M
 | `LOG_LEVEL` / `PORT` | `INFO` / `8083` | |
 
 ## Safety notes
+
+* Known gap: chat has no end-user auth in local dev (production: OIDC JWT at the gateway, session bound to `sub`).
+* All free-text tool results (vitals, alerts, guidelines) are delimited as untrusted data.
 
 * Retrieved chunks reach the model inside an `<untrusted_reference_material>` block (delimiters inside chunks are stripped) and the system prompt says never to follow instructions found there. A test with a poisoned document proves the scripted agent ignores it.
 * Documents carry `provenance` (`curated` bundled corpus, `api-upload`), shown in citations and search results.

@@ -26,7 +26,7 @@ PATIENT_ID_PATTERN = r"^P-\d{4,}$"
 class ChatRequest(BaseModel):
     """Body of `POST /api/v1/chat`."""
 
-    sessionId: str = Field(min_length=1, max_length=128, pattern=r"^[\w.\-:]+$")
+    sessionId: str | None = Field(default=None, max_length=128, pattern=r"^[\w.\-:]+$")
     patientId: str | None = Field(default=None, pattern=PATIENT_ID_PATTERN)
     message: str = Field(min_length=1, max_length=4000)
 
@@ -68,34 +68,40 @@ def require_admin(request: Request) -> None:
 async def _chat_stream(
     services: Services, body: ChatRequest, pseudonym_key: str
 ) -> AsyncIterator[str]:
-    history = services.memory.get(body.sessionId)
+    session_id = (
+        body.sessionId
+        if body.sessionId and services.memory.has(body.sessionId)
+        else services.memory.create()
+    )
+    history = services.memory.get(session_id)
     correlation_id = get_correlation_id()
     log.info(
         "chat_started",
-        sessionId=body.sessionId,
+        sessionId=session_id,
         patientRef=patient_ref(body.patientId, pseudonym_key) if body.patientId else None,
         historyMessages=len(history),
     )
+    yield format_sse("session", {"sessionId": session_id})
     try:
         async for event in services.agent.run(history, body.message, body.patientId):
             data = dict(event.data)
             if event.type == "done":
                 services.memory.append(
-                    body.sessionId,
+                    session_id,
                     [Message("user", body.message), Message("assistant", data["text"])],
                 )
-                data |= {"sessionId": body.sessionId, "correlationId": correlation_id}
+                data |= {"sessionId": session_id, "correlationId": correlation_id}
                 CHAT_REQUESTS.labels(status="ok").inc()
             yield format_sse(event.type, data)
     except Exception:
-        log.exception("chat_failed", sessionId=body.sessionId)
+        log.exception("chat_failed", sessionId=session_id)
         CHAT_REQUESTS.labels(status="error").inc()
         yield format_sse(
             "done",
             {
                 "text": "Sorry, something went wrong while answering. Please try again.",
                 "error": True,
-                "sessionId": body.sessionId,
+                "sessionId": session_id,
                 "correlationId": correlation_id,
             },
         )

@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from copilot import __version__
 from copilot.api import router
@@ -88,4 +89,5 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         allow_headers=["*"],
         expose_headers=[CORRELATION_HEADER],
     )
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_host_list)
     return app
