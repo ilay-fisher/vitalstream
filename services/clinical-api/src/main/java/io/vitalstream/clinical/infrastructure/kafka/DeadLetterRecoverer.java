@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaOperations;
 import org.springframework.kafka.listener.ConsumerRecordRecoverer;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
+import org.springframework.kafka.listener.ListenerExecutionFailedException;
 
 /**
  * Publishes a record that exhausted its retries (or was poison) to the dead-letter topic with the
@@ -48,11 +49,11 @@ public class DeadLetterRecoverer implements ConsumerRecordRecoverer {
   }
 
   static Headers errorHeaders(ConsumerRecord<?, ?> record, Exception exception) {
-    Throwable root = exception;
-    while (root.getCause() != null && root.getCause() != root) {
-      root = root.getCause();
+    Throwable cause = exception;
+    if (cause instanceof ListenerExecutionFailedException && cause.getCause() != null) {
+      cause = cause.getCause();
     }
-    String message = root.getClass().getSimpleName() + ": " + root.getMessage();
+    String message = cause.getClass().getSimpleName() + ": " + cause.getMessage();
     if (message.length() > MAX_ERROR_LENGTH) {
       message = message.substring(0, MAX_ERROR_LENGTH);
     }
