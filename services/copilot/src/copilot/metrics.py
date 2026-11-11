@@ -2,12 +2,8 @@
 
 from prometheus_client import Counter, Histogram
 
-CHAT_REQUESTS = Counter(
-    "copilot_chat_requests_total", "Chat requests handled", ["status"]
-)
-TOOL_CALLS = Counter(
-    "copilot_tool_calls_total", "Agent/MCP tool invocations", ["tool", "status"]
-)
+CHAT_REQUESTS = Counter("copilot_chat_requests_total", "Chat requests handled", ["status"])
+TOOL_CALLS = Counter("copilot_tool_calls_total", "Agent/MCP tool invocations", ["tool", "status"])
 RETRIEVAL_LATENCY = Histogram(
     "copilot_retrieval_latency_seconds",
     "Hybrid retrieval wall time",
@@ -19,6 +15,4 @@ LLM_LATENCY = Histogram(
     ["provider"],
     buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60),
 )
-LLM_TOKENS = Counter(
-    "copilot_llm_tokens_total", "LLM tokens consumed", ["provider", "direction"]
-)
+LLM_TOKENS = Counter("copilot_llm_tokens_total", "LLM tokens consumed", ["provider", "direction"])

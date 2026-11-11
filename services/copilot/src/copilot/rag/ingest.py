@@ -68,10 +68,7 @@ class IngestService:
         stored = await self._store.add_document(
             resolved_title,
             source,
-            [
-                NewChunk(c.ordinal, c.content, e)
-                for c, e in zip(chunks, embeddings, strict=True)
-            ],
+            [NewChunk(c.ordinal, c.content, e) for c, e in zip(chunks, embeddings, strict=True)],
         )
         try:
             await self._keyword.index_chunks(stored.chunks)
@@ -86,8 +83,10 @@ class IngestService:
         if await self._store.count_documents() > 0:
             return 0
         count = 0
-        for path in sorted(corpus_dir.glob("*.md")):
-            await self.ingest(title=None, content=path.read_text("utf-8"), source=f"corpus/{path.name}")
+        files = await asyncio.to_thread(lambda: sorted(corpus_dir.glob("*.md")))
+        for path in files:
+            content = await asyncio.to_thread(path.read_text, "utf-8")
+            await self.ingest(title=None, content=content, source=f"corpus/{path.name}")
             count += 1
         log.info("corpus_ingested", documents=count, directory=str(corpus_dir))
         return count

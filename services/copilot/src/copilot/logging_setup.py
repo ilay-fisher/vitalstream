@@ -2,11 +2,27 @@
 
 import logging
 import sys
+from typing import Any
 
 import structlog
 from structlog.typing import EventDict, WrappedLogger
 
 from copilot.correlation import get_correlation_id
+
+
+class _StdoutHandler(logging.StreamHandler):  # type: ignore[type-arg]
+    """Always writes to the *current* sys.stdout (keeps working when stdout is swapped)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    @property
+    def stream(self) -> Any:
+        return sys.stdout
+
+    @stream.setter
+    def stream(self, _: Any) -> None:
+        return None
 
 
 def _add_service_and_correlation(service: str) -> structlog.typing.Processor:
@@ -49,7 +65,7 @@ def configure_logging(service: str, level: str = "INFO") -> None:
             structlog.processors.JSONRenderer(),
         ],
     )
-    handler = logging.StreamHandler(sys.stdout)
+    handler = _StdoutHandler()
     handler.setFormatter(formatter)
     root = logging.getLogger()
     root.handlers = [handler]

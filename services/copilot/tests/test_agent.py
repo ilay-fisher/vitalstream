@@ -24,7 +24,9 @@ def _of(events: list[AgentEvent], kind: str) -> list[dict[str, Any]]:
     return [e.data for e in events if e.type == kind]
 
 
-def _mock_patient(router: respx.MockRouter, vitals: list[dict[str, Any]], alerts: list[Any]) -> None:
+def _mock_patient(
+    router: respx.MockRouter, vitals: list[dict[str, Any]], alerts: list[Any]
+) -> None:
     router.get(f"{CLINICAL}/api/v1/patients/P-0001/vitals").mock(
         return_value=httpx.Response(200, json=vitals)
     )
@@ -84,13 +86,18 @@ async def test_patient_id_is_remembered_from_history(
     stack: dict[str, Any], clinical_mock: respx.MockRouter
 ) -> None:
     _mock_patient(clinical_mock, STABLE, [])
-    history = [Message(role="user", content="Check P-0001"), Message(role="assistant", content="ok")]
+    history = [
+        Message(role="user", content="Check P-0001"),
+        Message(role="assistant", content="ok"),
+    ]
     events = await _run(stack["agent"], "and now?", history=history)
     assert _of(events, "tool_call")[0]["arguments"]["patient_id"] == "P-0001"
 
 
 async def test_general_question_only_searches_guidelines(stack: dict[str, Any]) -> None:
-    events = await _run(stack["agent"], "What does the NEWS2 escalation protocol say about a score of 7?")
+    events = await _run(
+        stack["agent"], "What does the NEWS2 escalation protocol say about a score of 7?"
+    )
     started = [d["name"] for d in _of(events, "tool_call") if d["status"] == "running"]
     assert started == ["search_guidelines"]
     answer = "".join(d["text"] for d in _of(events, "token"))

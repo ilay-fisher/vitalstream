@@ -1,0 +1,42 @@
+# Copilot fragment (CONTRACTS §8). Paths are relative to the repo root because the root Makefile
+# runs `docker compose --project-directory .` with infra/compose.yaml plus every fragment.
+services:
+  copilot:
+    build:
+      context: services/copilot
+      dockerfile: Dockerfile
+    image: vitalstream/copilot:local
+    container_name: copilot
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8083:8083"
+    environment:
+      POSTGRES_URL: postgresql://${POSTGRES_USER:-vitalstream}:${POSTGRES_PASSWORD:-vitalstream}@postgres:5432/${POSTGRES_DB:-vitalstream}
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      CLINICAL_API_URL: http://clinical-api:8082
+      LLM_PROVIDER: ${LLM_PROVIDER:-fake}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-claude-sonnet-5-5}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8083/health', timeout=2)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - vitalstream
+
+networks:
+  vitalstream:
+    name: vitalstream
+    external: false

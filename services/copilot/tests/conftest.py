@@ -23,14 +23,24 @@ DETERIORATING = [
     {"metric": "HEART_RATE", "value": 118.0, "unit": "/min", "observedAt": "2026-11-11T20:05:30Z"},
     {"metric": "SPO2", "value": 91.0, "unit": "%", "observedAt": "2026-11-11T20:15:30Z"},
     {"metric": "RESP_RATE", "value": 25.0, "unit": "/min", "observedAt": "2026-11-11T20:15:30Z"},
-    {"metric": "SYSTOLIC_BP", "value": 98.0, "unit": "mm[Hg]", "observedAt": "2026-11-11T20:15:30Z"},
+    {
+        "metric": "SYSTOLIC_BP",
+        "value": 98.0,
+        "unit": "mm[Hg]",
+        "observedAt": "2026-11-11T20:15:30Z",
+    },
     {"metric": "TEMPERATURE", "value": 38.6, "unit": "Cel", "observedAt": "2026-11-11T20:15:30Z"},
 ]
 STABLE = [
     {"metric": "HEART_RATE", "value": 72.0, "unit": "/min", "observedAt": "2026-11-11T20:15:30Z"},
     {"metric": "SPO2", "value": 98.0, "unit": "%", "observedAt": "2026-11-11T20:15:30Z"},
     {"metric": "RESP_RATE", "value": 15.0, "unit": "/min", "observedAt": "2026-11-11T20:15:30Z"},
-    {"metric": "SYSTOLIC_BP", "value": 125.0, "unit": "mm[Hg]", "observedAt": "2026-11-11T20:15:30Z"},
+    {
+        "metric": "SYSTOLIC_BP",
+        "value": 125.0,
+        "unit": "mm[Hg]",
+        "observedAt": "2026-11-11T20:15:30Z",
+    },
     {"metric": "TEMPERATURE", "value": 36.9, "unit": "Cel", "observedAt": "2026-11-11T20:15:30Z"},
 ]
 ALERT_HIGH = {

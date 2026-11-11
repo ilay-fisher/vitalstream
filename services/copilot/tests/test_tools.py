@@ -115,7 +115,9 @@ async def test_minutes_must_be_in_range(minutes: int) -> None:
 
 @respx.mock
 async def test_list_alerts_normalises_alert_views_and_passes_filters() -> None:
-    route = respx.get(f"{BASE}/api/v1/alerts").mock(return_value=httpx.Response(200, json=ALERTS_PAGE))
+    route = respx.get(f"{BASE}/api/v1/alerts").mock(
+        return_value=httpx.Response(200, json=ALERTS_PAGE)
+    )
     result = await (await _tools()).list_alerts(patient_id="P-0001", severity="HIGH")
     params = route.calls.last.request.url.params
     assert params["patientId"] == "P-0001"
@@ -167,9 +169,12 @@ async def test_compute_news2_tool_wraps_validation_errors() -> None:
 
 async def test_call_dispatches_by_name_and_counts_metrics() -> None:
     tools = await _tools()
-    before = REGISTRY.get_sample_value(
-        "copilot_tool_calls_total", {"tool": "compute_news2", "status": "ok"}
-    ) or 0.0
+    before = (
+        REGISTRY.get_sample_value(
+            "copilot_tool_calls_total", {"tool": "compute_news2", "status": "ok"}
+        )
+        or 0.0
+    )
     result = await tools.call(
         "compute_news2", {"rr": 16, "spo2": 98, "sbp": 120, "hr": 70, "temp": 37.0}
     )

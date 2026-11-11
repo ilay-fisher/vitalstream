@@ -57,7 +57,18 @@ def test_spo2_scale2_bands(spo2: float, on_o2: bool, expected_spo2_points: int) 
 
 @pytest.mark.parametrize(
     ("sbp", "expected"),
-    [(50, 3), (90, 3), (91, 2), (100, 2), (101, 1), (110, 1), (111, 0), (219, 0), (220, 3), (260, 3)],
+    [
+        (50, 3),
+        (90, 3),
+        (91, 2),
+        (100, 2),
+        (101, 1),
+        (110, 1),
+        (111, 0),
+        (219, 0),
+        (220, 3),
+        (260, 3),
+    ],
 )
 def test_systolic_bp_bands(sbp: float, expected: int) -> None:
     assert _score(sbp=sbp) == expected
@@ -189,7 +200,9 @@ def test_to_dict_is_json_friendly() -> None:
     assert data["inputs"]["hr"] == 131
 
 
-@pytest.mark.parametrize("bad", [{"rr": -1.0}, {"spo2": 120.0}, {"temp": 5.0}, {"hr": 0.0}, {"sbp": -5.0}])
+@pytest.mark.parametrize(
+    "bad", [{"rr": -1.0}, {"spo2": 120.0}, {"temp": 5.0}, {"hr": 0.0}, {"sbp": -5.0}]
+)
 def test_implausible_values_rejected(bad: dict[str, float]) -> None:
     with pytest.raises(ValueError, match="plausible"):
         compute_news2(**{**NORMAL, **bad})
