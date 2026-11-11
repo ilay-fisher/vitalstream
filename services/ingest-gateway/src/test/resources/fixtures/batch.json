@@ -1,0 +1,9 @@
+{
+  "deviceId": "DEV-ICU-0001",
+  "patientId": "P-0001",
+  "readings": [
+    {"eventId": "6f1c2a1e-8d0b-4c11-9a77-3f0c2b9e1d10", "metric": "HEART_RATE", "value": 118.0, "observedAt": "2026-11-11T20:15:30.123Z"},
+    {"eventId": "7f1c2a1e-8d0b-4c11-9a77-3f0c2b9e1d10", "metric": "SPO2", "value": 97, "observedAt": "2026-11-11T20:15:30.123Z"},
+    {"eventId": "8f1c2a1e-8d0b-4c11-9a77-3f0c2b9e1d10", "metric": "HEART_RATE", "value": "n/a", "observedAt": "2026-11-11T20:15:31Z"}
+  ]
+}
