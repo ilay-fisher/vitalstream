@@ -66,7 +66,7 @@ Retention: `vitals.raw` 7 days, `alerts.*` 30 days. Replication factor 1 locally
 | value | number | within physiological range below, else reject |
 | unit | string | UCUM, must match metric |
 | loinc | string | must match metric |
-| observedAt | ISO-8601 UTC | not more than 5 min in the future |
+| observedAt | ISO-8601 UTC | gateway rejects > 5 min in the future (coarse device-clock check); stream-processor drops > 30 s ahead (see §7) |
 | ingestedAt | ISO-8601 UTC | set by gateway |
 | source | enum | `FHIR`, `HL7V2`, `DEVICE_BATCH` |
 
@@ -227,7 +227,7 @@ JSON log fields: `timestamp`, `level`, `service`, `correlationId`, `message`, pl
 
 **PHI minimisation:** never log raw `patientId` (it is a medical record identifier). Log `patientRef` = first 12 hex chars of HMAC-SHA256(patientId, `LOG_PSEUDONYM_KEY`). Env `LOG_PSEUDONYM_KEY` default `dev-only-pseudonym-key` (must be overridden outside local dev). Same algorithm in every service so refs correlate across logs. Test vector: HMAC-SHA256("P-0001", "dev-only-pseudonym-key") → assert your helper matches the other languages (compute and pin it in a unit test).
 
-**Event-time guard (stream-processor):** before watermarking or any state update, drop events whose `observedAt` is more than 5 min ahead of processing time or older than 24 h; count them (`vitalstream_events_dropped_total{reason}`) and log at WARN with `eventId` only. Prevents watermark poisoning that would suppress alerts.
+**Event-time guard (stream-processor):** before `withWatermark` or any state update, drop events whose `observedAt` is more than `MAX_FUTURE_SKEW` ahead of processing time or older than 24 h; count them (`vitalstream_events_dropped_total{reason}`) and log at WARN with `eventId` only. `MAX_FUTURE_SKEW` must be ≤ the watermark delay (30 s) and is derived from it in code, not configured independently. Reason: Spark's watermark tracks the max event time across all partitions, so one event at now+Δ moves the global watermark to now+Δ−30 s and every on-time event for every patient becomes late and is silently dropped (alert suppression). With Δ ≤ 30 s the watermark can never pass real time. The gateway's 5 min limit is only a coarse input check; it is not this guard.
 
 **Prometheus metric names (Grafana "VitalStream Overview" depends on these):**
 
@@ -242,7 +242,7 @@ JSON log fields: `timestamp`, `level`, `service`, `correlationId`, `message`, pl
 
 Micrometer names `vitalstream.events.ingested` etc. export as the names above. The event-time guard counter above is `vitalstream_events_dropped_total`.
 
-**Schema validation notes:** `contracts/schemas/device-batch.schema.json` describes the `POST /api/v1/vitals/batch` body. Rules JSON Schema cannot express (observedAt ≤ now + 5 min, ≥ now − 24 h) are enforced in code by the gateway (reject) and stream-processor (drop).
+**Schema validation notes:** `contracts/schemas/device-batch.schema.json` describes the `POST /api/v1/vitals/batch` body. Rules JSON Schema cannot express (gateway: observedAt ≤ now + 5 min, ≥ now − 24 h → reject; stream-processor: ≤ now + 30 s, ≥ now − 24 h → drop) are enforced in code.
 
 ## 8. Compose integration
 
