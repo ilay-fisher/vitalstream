@@ -669,6 +669,87 @@ main:focus {
 .alert-fresh {
   animation: pulse 1.6s ease-out 2;
 }
+.alert-escalated {
+  animation: escalate 3s ease-out 1;
+}
+.alert-leaving {
+  animation: leave 1.2s ease-in forwards;
+}
+@keyframes escalate {
+  0%,
+  35% {
+    background: var(--high-bg);
+    box-shadow: 0 0 0 3px var(--high-fg);
+  }
+  100% {
+    background: var(--surface);
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+@keyframes leave {
+  from {
+    opacity: 0.78;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+.occurrences {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.disclosure {
+  margin-top: 6px;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+.alert-children {
+  grid-column: 1 / -1;
+}
+.alert-children:empty {
+  display: none;
+}
+.children {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.episode-summary {
+  padding: 5px 10px;
+  background: var(--surface-2);
+  border-left: 3px solid var(--line);
+  border-radius: var(--radius);
+}
+.episode-summary.alert-critical {
+  border-left-color: var(--critical-bg);
+}
+.episode-summary.alert-high {
+  border-left-color: var(--high-fg);
+}
+.episode-summary.alert-medium {
+  border-left-color: var(--medium-fg);
+}
+.episode-summary.alert-low {
+  border-left-color: var(--low-fg);
+}
+.episode-summary .alert-message {
+  margin-top: 2px;
+}
+.resolved {
+  margin-top: 18px;
+}
+.resolved h2 {
+  margin: 0;
+  font-size: 14px;
+}
 .alert-meta {
   display: flex;
   flex-wrap: wrap;
@@ -947,5 +1028,8 @@ main:focus {
   *::after {
     animation: none !important;
     transition: none !important;
+  }
+  .alert-escalated {
+    outline: 2px solid var(--high-fg);
   }
 }

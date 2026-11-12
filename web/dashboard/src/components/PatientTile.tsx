@@ -3,7 +3,10 @@ import { news2FromLatest } from '../lib/news2';
 import { METRIC_ORDER, METRICS, type PatientSummary } from '../lib/types';
 import { News2Badge } from './badges';
 
-/** One bed on the ward: identity, NEWS2, open alerts and the six latest values. */
+/**
+ * One bed on the ward: identity, NEWS2, ongoing alert episodes (clinical-api `openAlerts`, top-level
+ * only, so a NEWS2 episode and the findings behind it count once) and the six latest values.
+ */
 export function PatientTile({
   patient,
   highlight = false,
@@ -13,12 +16,15 @@ export function PatientTile({
 }) {
   const score = news2FromLatest(patient.latest);
   const attention = (score ?? 0) >= 5;
+  const count = patient.openAlertCount;
+  const openLabel =
+    count > 0 ? `${count} open ${count === 1 ? 'alert' : 'alerts'}` : 'No open alerts';
   return (
     <a
       className={`tile${attention ? ' tile-attention' : ''}${highlight ? ' tile-fresh' : ''}`}
       href={`#/patients/${patient.id}`}
       data-testid={`tile-${patient.id}`}
-      aria-label={`${patient.name}, bed ${patient.bed}, ${patient.openAlertCount} open alerts`}
+      aria-label={`${patient.name}, bed ${patient.bed}, ${openLabel}`}
     >
       <header>
         <div>
@@ -51,11 +57,7 @@ export function PatientTile({
           );
         })}
       </dl>
-      <footer className={patient.openAlertCount > 0 ? 'has-alerts' : undefined}>
-        {patient.openAlertCount > 0
-          ? `${patient.openAlertCount} open ${patient.openAlertCount === 1 ? 'alert' : 'alerts'}`
-          : 'No open alerts'}
-      </footer>
+      <footer className={patient.openAlertCount > 0 ? 'has-alerts' : undefined}>{openLabel}</footer>
     </a>
   );
 }

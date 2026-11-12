@@ -55,6 +55,15 @@ describe('episodesReducer', () => {
     expect(s.byId[fixture(1).alertId].occurrences).toBe(99);
   });
 
+  it('prunes ongoing top-level episodes missing from an authoritative reload', () => {
+    let s = loaded();
+    const keep = all.filter((a) => a.alertId !== fixture(9).alertId);
+    s = episodesReducer(s, { type: 'load', items: keep, prune: true });
+    expect(s.byId[fixture(9).alertId]).toBeUndefined();
+    expect(s.byId[fixture(2).alertId]).toBeDefined();
+    expect(s.byId[fixture(13).alertId]).toBeDefined();
+  });
+
   it('flags an escalation (severity went up) and not a plain update', () => {
     const medium = fixture(8);
     let s = loaded();

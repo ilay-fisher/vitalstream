@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef } from 'react';
 import { newCorrelationId, normalizeAlert, type Api } from '../lib/api';
+import type { AlertView } from '../lib/types';
 import { initialLiveAlerts, liveAlertsReducer } from '../lib/alertsReducer';
 import { SseHttpError, streamSse } from '../lib/sse';
 
@@ -10,9 +11,9 @@ const RECONNECT_MAX_MS = 15000;
  * Subscribes to `/api/v1/alerts/stream` (SSE event `alert`) and keeps reconnecting with capped
  * backoff. Uses fetch rather than EventSource so the request carries the bearer token (never in
  * the URL) and X-Correlation-Id. A 401 ends the session instead of retrying.
- * `onAlert` is called for every received alert (after the state update is queued).
+ * `onAlert` is called with every received alert (after the state update is queued).
  */
-export function useAlertStream(api: Api, onAlert?: () => void) {
+export function useAlertStream(api: Api, onAlert?: (alert: AlertView) => void) {
   const [state, dispatch] = useReducer(liveAlertsReducer, initialLiveAlerts);
   const onAlertRef = useRef(onAlert);
   onAlertRef.current = onAlert;
@@ -43,8 +44,9 @@ export function useAlertStream(api: Api, onAlert?: () => void) {
               dispatch({ type: 'connection', connection: 'open' });
               if (message.event !== 'alert') return;
               try {
-                dispatch({ type: 'alert', alert: normalizeAlert(JSON.parse(message.data)) });
-                onAlertRef.current?.();
+                const alert = normalizeAlert(JSON.parse(message.data));
+                dispatch({ type: 'alert', alert });
+                onAlertRef.current?.(alert);
               } catch {
                 /* ignore a malformed event, keep the stream */
               }

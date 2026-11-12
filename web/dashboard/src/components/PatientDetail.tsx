@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useEpisodes } from '../hooks/useEpisodes';
 import { useResource } from '../hooks/useResource';
+import { selectForPatient } from '../lib/episodes';
 import { news2FromLatest } from '../lib/news2';
-import { METRIC_ORDER, type AlertView, type Resolution } from '../lib/types';
+import { METRIC_ORDER, type Resolution } from '../lib/types';
 import { useApi } from './ApiContext';
 import { AlertList } from './AlertList';
 import { News2Badge } from './badges';
@@ -14,9 +16,10 @@ const RANGES = [
   { key: '24h', label: '24 hours', ms: 24 * 3_600_000 },
 ] as const;
 
-const NO_ALERTS: AlertView[] = [];
-
-/** One patient: six charts over a chosen range and resolution, plus the alert history. */
+/**
+ * One patient: six charts over a chosen range and resolution, plus all of the patient's alert
+ * episodes (ongoing, contributing and resolved), kept live from the alert stream.
+ */
 export function PatientDetail({ id }: { id: string }) {
   const api = useApi();
   const [range, setRange] = useState<(typeof RANGES)[number]['key']>('1h');
@@ -30,7 +33,13 @@ export function PatientDetail({ id }: { id: string }) {
   }, [range, resolution, id]);
 
   const patient = useResource(() => api.getPatient(id), [api, id]);
-  const alerts = useResource(() => api.listAlerts({ patientId: id, size: 50 }), [api, id]);
+  const alerts = useResource(() => api.listAlerts({ patientId: id, size: 100 }), [api, id]);
+  const episodes = useEpisodes(api);
+  const { load, apply, state } = episodes;
+  useEffect(() => {
+    if (alerts.data) load(alerts.data.items);
+  }, [alerts.data, load]);
+  const history = useMemo(() => selectForPatient(state, id), [state, id]);
   const series = useResource(
     () =>
       Promise.all(
@@ -103,10 +112,19 @@ export function PatientDetail({ id }: { id: string }) {
         ))}
       </div>
 
-      <h2>Alert history</h2>
+      <h2>Alert episodes</h2>
+      {alerts.error && (
+        <div role="alert" className="notice notice-error">
+          Could not load alerts: {alerts.error.message}{' '}
+          <button onClick={alerts.reload}>Try again</button>
+        </div>
+      )}
       <AlertList
-        alerts={alerts.data?.items ?? NO_ALERTS}
+        alerts={history}
         showPatient={false}
+        freshIds={state.fresh}
+        escalatedIds={state.escalated}
+        onChange={apply}
         empty="No alerts for this patient."
       />
     </section>
