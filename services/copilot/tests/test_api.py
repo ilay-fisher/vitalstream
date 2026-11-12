@@ -14,12 +14,13 @@ from copilot.agent.memory import ConversationMemory
 from copilot.app import create_app
 from copilot.config import Settings
 from copilot.services import Services
-from tests.conftest import ALERT_HIGH, CLINICAL, DETERIORATING
+from tests.conftest import ALERT_HIGH, CLINICAL, DETERIORATING, USER_HEADERS
 
 
 def make_services(stack: dict[str, Any], **overrides: Any) -> Services:
     services = Services(
         tools=stack["tools"],
+        mcp_tools=stack["mcp_tools"],
         agent=stack["agent"],
         memory=ConversationMemory(ttl_seconds=60, max_sessions=10, max_messages=20),
         ingest=stack["ingest"],
@@ -36,9 +37,9 @@ async def app(stack: dict[str, Any]) -> AsyncIterator[FastAPI]:
 
 
 @pytest.fixture
-async def client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
+async def client(app: FastAPI, clinical_mock: respx.MockRouter) -> AsyncIterator[httpx.AsyncClient]:
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://localhost"
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost", headers=USER_HEADERS
     ) as c:
         yield c
 
@@ -99,7 +100,7 @@ async def test_correlation_id_is_forwarded_to_clinical_api(
         headers={"X-Correlation-Id": "corr-fwd-9"},
     )
     assert route.calls.last.request.headers["X-Correlation-Id"] == "corr-fwd-9"
-    assert route.calls.last.request.headers["Authorization"] == "Bearer test-service-token"
+    assert route.calls.last.request.headers["Authorization"] == "Bearer test-user-token"
 
 
 async def test_session_memory_carries_patient_between_turns(

@@ -8,14 +8,16 @@ import respx
 from copilot.agent.graph import CopilotAgent
 from copilot.app import create_app
 from copilot.config import Settings
-from tests.conftest import ALERT_HIGH, CLINICAL, STABLE
+from tests.conftest import ALERT_HIGH, CLINICAL, STABLE, USER_HEADERS
 from tests.test_api import make_services, mock_clinical, parse_sse
 from tests.test_security import Recorder
 
 
 async def _client(stack: dict[str, Any], host: str = "localhost") -> httpx.AsyncClient:
     app = create_app(Settings(), make_services(stack))
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=f"http://{host}")
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url=f"http://{host}", headers=USER_HEADERS
+    )
 
 
 async def test_host_allowlist_applies_to_every_route(stack: dict[str, Any]) -> None:
@@ -64,7 +66,9 @@ async def test_client_chosen_session_id_is_never_adopted(
     assert parse_sse(reuse.text)[0][1]["sessionId"] == victim_id
 
 
-async def test_expired_session_is_replaced_not_resurrected(stack: dict[str, Any]) -> None:
+async def test_expired_session_is_replaced_not_resurrected(
+    stack: dict[str, Any], clinical_mock: respx.MockRouter
+) -> None:
     services = make_services(stack)
     sid = services.memory.create()
     services.memory._sessions.clear()

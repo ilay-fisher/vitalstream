@@ -15,9 +15,11 @@ from copilot.clinical_auth import (
     REFRESH_MARGIN,
     DevTokenProvider,
     StaticTokenProvider,
+    UserTokenProvider,
     build_token_provider,
 )
 from copilot.config import Settings
+from copilot.user_context import set_user_token
 
 BASE = "http://clinical.test"
 TOKEN_URL = f"{BASE}/api/v1/dev/token"
@@ -66,7 +68,7 @@ async def test_static_provider_returns_the_configured_token() -> None:
 # ---- dev token provider ------------------------------------------------------------------------
 
 
-async def test_dev_provider_requests_a_service_token_for_copilot() -> None:
+async def test_dev_provider_requests_a_service_token_for_copilot_mcp() -> None:
     clock = Clock()
     async with httpx.AsyncClient() as http:
         with respx.mock(assert_all_called=False) as router:
@@ -75,7 +77,7 @@ async def test_dev_provider_requests_a_service_token_for_copilot() -> None:
             token = await provider.token()
     assert token == "dev-tok"
     body = json.loads(route.calls.last.request.content)
-    assert body == {"sub": "copilot", "name": "Copilot", "roles": ["SERVICE"]}
+    assert body == {"sub": "copilot-mcp", "name": "Copilot MCP", "roles": ["SERVICE"]}
 
 
 async def test_dev_provider_caches_until_sixty_seconds_before_expiry() -> None:
@@ -248,3 +250,43 @@ def test_prod_without_a_usable_token_fails_startup(token: SecretStr | None) -> N
 def test_create_app_refuses_prod_without_clinical_api_token() -> None:
     with pytest.raises(ValueError, match="CLINICAL_API_TOKEN"):
         create_app(prod(clinical_api_token=None))
+
+
+# ---- user token (chat) -------------------------------------------------------------------------
+
+
+async def test_user_provider_returns_the_token_of_the_current_request() -> None:
+    set_user_token("tok-user")
+    try:
+        assert await UserTokenProvider().token() == "tok-user"
+    finally:
+        set_user_token(None)
+
+
+async def test_user_provider_refuses_to_run_without_a_user_token() -> None:
+    set_user_token(None)
+    with pytest.raises(ClinicalApiError, match="no user token"):
+        await UserTokenProvider().token()
+
+
+async def test_client_me_returns_the_identity_and_reports_the_status() -> None:
+    client = ClinicalApiClient(BASE, UserTokenProvider(), timeout=2.0)
+    with respx.mock(assert_all_called=False) as router:
+        route = router.get(f"{BASE}/api/v1/me")
+        route.mock(
+            return_value=httpx.Response(200, json={"sub": "observer", "name": "O", "roles": ["VIEWER"]})
+        )
+        assert (await client.me("tok-1"))["sub"] == "observer"
+        assert route.calls.last.request.headers["Authorization"] == "Bearer tok-1"
+        route.mock(return_value=httpx.Response(403))
+        with pytest.raises(ClinicalApiError) as denied:
+            await client.me("tok-1")
+        assert denied.value.status == 403
+        route.mock(return_value=httpx.Response(200, json=["not", "an", "object"]))
+        with pytest.raises(ClinicalApiError):
+            await client.me("tok-1")
+        route.mock(side_effect=httpx.ConnectError("down"))
+        with pytest.raises(ClinicalApiError) as down:
+            await client.me("tok-1")
+        assert down.value.status is None
+    await client.aclose()
