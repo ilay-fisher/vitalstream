@@ -292,7 +292,8 @@ class AlertIngestServiceTest {
   void detectionAfterResolutionOpensANewEpisodeAndNotifies() {
     service.ingest(hr(Severity.HIGH, 0), "c");
     Alert first = alerts.all().getFirst();
-    alerts.resolveStale(Instant.parse("2026-11-11T21:00:00Z"), Instant.parse("2026-11-11T21:00:00Z"));
+    alerts.resolveStale(
+        Instant.parse("2026-11-11T21:00:00Z"), Instant.parse("2026-11-11T21:00:00Z"));
     org.mockito.Mockito.clearInvocations(outbox);
 
     AlertIngestService.Outcome outcome = service.ingest(hr(Severity.HIGH, 60), "c");
@@ -310,7 +311,8 @@ class AlertIngestServiceTest {
   void replayOfAResolvedEpisodesFirstDetectionIsIgnored() {
     AlertEvent first = hr(Severity.HIGH, 0);
     service.ingest(first, "c");
-    alerts.resolveStale(Instant.parse("2026-11-11T21:00:00Z"), Instant.parse("2026-11-11T21:00:00Z"));
+    alerts.resolveStale(
+        Instant.parse("2026-11-11T21:00:00Z"), Instant.parse("2026-11-11T21:00:00Z"));
 
     assertThat(service.ingest(first, "c")).isEqualTo(AlertIngestService.Outcome.IGNORED);
     assertThat(alerts.all()).hasSize(1);
@@ -326,7 +328,8 @@ class AlertIngestServiceTest {
 
     service.ingest(hr(Severity.MEDIUM, 0), "c");
 
-    Alert child = alerts.all().stream().filter(a -> a.type() == AlertType.THRESHOLD).findFirst().get();
+    Alert child =
+        alerts.all().stream().filter(a -> a.type() == AlertType.THRESHOLD).findFirst().get();
     assertThat(child.parentAlertId()).isEqualTo(parent.id());
     assertThat(outboxTypesFor(child.id())).containsExactly(OutboxEventType.ALERT_INDEX);
     assertThat(outboxTypesFor(parent.id())).containsExactly(OutboxEventType.ALERT_INDEX);
@@ -343,7 +346,8 @@ class AlertIngestServiceTest {
 
     service.ingest(hr(Severity.CRITICAL, 0), "c");
 
-    Alert child = alerts.all().stream().filter(a -> a.type() == AlertType.THRESHOLD).findFirst().get();
+    Alert child =
+        alerts.all().stream().filter(a -> a.type() == AlertType.THRESHOLD).findFirst().get();
     assertThat(child.parentAlertId()).isNull();
     assertThat(outboxTypesFor(child.id()))
         .containsExactly(
@@ -410,7 +414,8 @@ class AlertIngestServiceTest {
   @Test
   void aResolvedNews2DoesNotAdopt() {
     service.ingest(news2(Severity.CRITICAL, 0), "c");
-    alerts.resolveStale(Instant.parse("2026-11-11T21:00:00Z"), Instant.parse("2026-11-11T21:00:00Z"));
+    alerts.resolveStale(
+        Instant.parse("2026-11-11T21:00:00Z"), Instant.parse("2026-11-11T21:00:00Z"));
 
     service.ingest(hr(Severity.LOW, 60), "c");
 

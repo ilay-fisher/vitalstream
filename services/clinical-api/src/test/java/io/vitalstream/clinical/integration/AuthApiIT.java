@@ -25,8 +25,7 @@ class AuthApiIT extends IntegrationTestBase {
             id, patientId, "THRESHOLD", "HIGH", "HEART_RATE", "2026-11-11T20:15:00Z", "tachy"),
         patientId,
         "c-auth");
-    awaitAlertStored(id);
-    return id;
+    return awaitEpisode(id);
   }
 
   @Test

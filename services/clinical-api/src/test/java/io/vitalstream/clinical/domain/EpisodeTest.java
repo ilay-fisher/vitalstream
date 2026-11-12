@@ -157,20 +157,19 @@ class EpisodeTest {
 
   @Test
   void detectionRequiresItsWindow() {
-    assertThatThrownBy(
-            () ->
-                new Detection(
-                    UUID.randomUUID(),
-                    "P-1",
-                    AlertType.NEWS2,
-                    Severity.LOW,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    NOW,
-                    NOW))
+    assertThatThrownBy(() ->
+            new Detection(
+                UUID.randomUUID(),
+                "P-1",
+                AlertType.NEWS2,
+                Severity.LOW,
+                null,
+                null,
+                null,
+                null,
+                null,
+                NOW,
+                NOW))
         .isInstanceOf(NullPointerException.class);
   }
 

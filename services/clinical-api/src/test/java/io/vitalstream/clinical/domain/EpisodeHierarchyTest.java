@@ -45,8 +45,7 @@ class EpisodeHierarchyTest {
   @Test
   void withoutAParentEpisodeEverythingIsTopLevel() {
     assertThat(
-            EpisodeHierarchy.parentFor(
-                child(AlertType.THRESHOLD, Severity.LOW), Optional.empty()))
+            EpisodeHierarchy.parentFor(child(AlertType.THRESHOLD, Severity.LOW), Optional.empty()))
         .isNull();
   }
 

@@ -70,7 +70,9 @@ class EpisodeResolverTest {
     assertThat(after.status()).isEqualTo(AlertStatus.RESOLVED);
     assertThat(after.resolvedAt()).isEqualTo(SEEN.plus(Duration.ofMinutes(5)).plusSeconds(1));
     assertThat(after.version()).isEqualTo(1);
-    assertThat(outboxRows()).extracting(OutboxEntry::eventType).containsExactly(OutboxEventType.ALERT_INDEX);
+    assertThat(outboxRows())
+        .extracting(OutboxEntry::eventType)
+        .containsExactly(OutboxEventType.ALERT_INDEX);
     ArgumentCaptor<AlertView> view = ArgumentCaptor.forClass(AlertView.class);
     verify(liveFeed).publish(view.capture());
     assertThat(view.getValue().status()).isEqualTo(AlertStatus.RESOLVED);
@@ -132,10 +134,14 @@ class EpisodeResolverTest {
     assertThat(orphan.status()).isEqualTo(AlertStatus.OPEN);
     assertThat(orphan.parentAlertId()).isNull();
     assertThat(orphan.version()).isEqualTo(1);
-    assertThat(outboxRows()).extracting(OutboxEntry::aggregateId).containsExactlyInAnyOrder(parent.id(), child.id());
+    assertThat(outboxRows())
+        .extracting(OutboxEntry::aggregateId)
+        .containsExactlyInAnyOrder(parent.id(), child.id());
     ArgumentCaptor<AlertView> views = ArgumentCaptor.forClass(AlertView.class);
     verify(liveFeed, org.mockito.Mockito.times(2)).publish(views.capture());
-    assertThat(views.getAllValues()).extracting(AlertView::alertId).containsExactlyInAnyOrder(parent.id(), child.id());
+    assertThat(views.getAllValues())
+        .extracting(AlertView::alertId)
+        .containsExactlyInAnyOrder(parent.id(), child.id());
   }
 
   @Test
@@ -152,7 +158,10 @@ class EpisodeResolverTest {
     ArgumentCaptor<AlertView> views = ArgumentCaptor.forClass(AlertView.class);
     verify(liveFeed, org.mockito.Mockito.times(2)).publish(views.capture());
     AlertView parentView =
-        views.getAllValues().stream().filter(v -> v.alertId().equals(parent.id())).findFirst().get();
+        views.getAllValues().stream()
+            .filter(v -> v.alertId().equals(parent.id()))
+            .findFirst()
+            .get();
     assertThat(parentView.childCount()).isZero();
     assertThat(parentView.version()).isEqualTo(1);
   }

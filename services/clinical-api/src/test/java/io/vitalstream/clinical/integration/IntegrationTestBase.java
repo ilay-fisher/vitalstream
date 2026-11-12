@@ -63,6 +63,8 @@ abstract class IntegrationTestBase {
     r.add("vitalstream.outbox.interval-ms", () -> "200");
     r.add("vitalstream.dev-tokens-enabled", () -> "true");
     r.add("vitalstream.sse.heartbeat-ms", () -> "1000");
+    // test windows are in the past: a running resolver would close every episode within a minute
+    r.add("vitalstream.episodes.resolve-interval-ms", () -> "3600000");
   }
 
   @Value("${local.server.port}")
@@ -111,7 +113,10 @@ abstract class IntegrationTestBase {
     return token == null ? builder : builder.header("Authorization", "Bearer " + token);
   }
 
-  /** AlertEvent JSON as the stream processor would produce it. */
+  /**
+   * AlertEvent JSON (one detection) as the stream processor would produce it: a 1-minute window
+   * starting at {@code windowStart}, detected two seconds after it closes.
+   */
   protected static String alertJson(
       UUID id,
       String patientId,
@@ -122,7 +127,7 @@ abstract class IntegrationTestBase {
       String message) {
     return """
     {"alertId":"%s","patientId":"%s","type":"%s","severity":"%s","metric":%s,"value":%s,"score":null,
-     "message":"%s","windowStart":"%s","windowEnd":"2026-11-11T20:16:00Z","detectedAt":"2026-11-11T20:16:02.010Z"}
+     "message":"%s","windowStart":"%s","windowEnd":"%s","detectedAt":"%s"}
     """
         .formatted(
             id,
@@ -132,7 +137,9 @@ abstract class IntegrationTestBase {
             metric == null ? "null" : "\"" + metric + "\"",
             metric == null ? "null" : "142.0",
             message,
-            windowStart);
+            windowStart,
+            Instant.parse(windowStart).plusSeconds(60),
+            Instant.parse(windowStart).plusSeconds(62));
   }
 
   protected static void send(String topic, String key, byte[] value, String correlationId) {
@@ -154,15 +161,42 @@ abstract class IntegrationTestBase {
     send("alerts.detected", patientId, json.getBytes(StandardCharsets.UTF_8), correlationId);
   }
 
-  protected void awaitAlertStored(UUID id) {
+  /**
+   * Waits until the detection has been folded into an episode and returns the episode id (clients
+   * only ever see episode ids; the detection id survives as {@code lastDetectionId}).
+   */
+  protected UUID awaitEpisode(UUID detectionId) {
     await()
         .atMost(Duration.ofSeconds(30))
         .until(() ->
-            jdbc.sql("SELECT count(*) FROM clinical.alerts WHERE id = :id")
-                    .param("id", id)
+            jdbc.sql("SELECT count(*) FROM clinical.alerts WHERE last_detection_id = :id")
+                    .param("id", detectionId)
                     .query(Long.class)
                     .single()
                 == 1L);
+    return jdbc.sql("SELECT id FROM clinical.alerts WHERE last_detection_id = :id")
+        .param("id", detectionId)
+        .query(UUID.class)
+        .single();
+  }
+
+  protected void awaitOccurrences(UUID episodeId, int occurrences) {
+    await()
+        .atMost(Duration.ofSeconds(30))
+        .until(() ->
+            jdbc.sql("SELECT occurrences FROM clinical.alerts WHERE id = :id")
+                    .param("id", episodeId)
+                    .query(Integer.class)
+                    .optional()
+                    .orElse(0)
+                == occurrences);
+  }
+
+  protected long countEpisodes(String patientId) {
+    return jdbc.sql("SELECT count(*) FROM clinical.alerts WHERE patient_id = :p")
+        .param("p", patientId)
+        .query(Long.class)
+        .single();
   }
 
   /** Reads queue {@code notify.all} until a message for the alert shows up (or the wait ends). */

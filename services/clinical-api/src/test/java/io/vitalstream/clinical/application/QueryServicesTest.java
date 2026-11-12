@@ -30,7 +30,8 @@ class QueryServicesTest {
 
   @Test
   void listWithoutTextQueryUsesPostgres() {
-    AlertFilter filter = new AlertFilter("P-0001", Severity.HIGH, null, null, false, null, null, 0, 20);
+    AlertFilter filter =
+        new AlertFilter("P-0001", Severity.HIGH, null, null, false, null, null, 0, 20);
     PageResult<AlertView> page = new PageResult<>(List.of(), 0, 20, 0);
     when(alerts.search(filter)).thenReturn(page);
 

@@ -3,6 +3,7 @@ package io.vitalstream.clinical.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import io.vitalstream.clinical.application.EpisodeResolver;
 import io.vitalstream.clinical.application.OutboxEntry;
 import io.vitalstream.clinical.application.OutboxRepository;
 import io.vitalstream.clinical.domain.OutboxEventType;
@@ -29,6 +30,7 @@ class LiveFeedAndPlatformIT extends IntegrationTestBase {
   @Autowired StringRedisTemplate redis;
   @Autowired OutboxRepository outbox;
   @Autowired TransactionTemplate tx;
+  @Autowired EpisodeResolver resolver;
 
   /** Opens {@code /api/v1/alerts/stream} and collects raw lines until closed. */
   private SseClient openStream() throws Exception {
@@ -89,6 +91,43 @@ class LiveFeedAndPlatformIT extends IntegrationTestBase {
       await().atMost(Duration.ofSeconds(30)).until(() -> client.joined().contains(id.toString()));
 
       assertThat(client.joined()).contains("event:alert").contains("\"patientId\":\"P-3001\"");
+    }
+  }
+
+  @Test
+  void everyEpisodeChangeIsPushedWithAnIncreasingVersionInTheEventId() throws Exception {
+    try (SseClient client = openStream()) {
+      UUID first = UUID.randomUUID();
+      sendAlert(
+          alertJson(first, "P-3004", "THRESHOLD", "MEDIUM", "SPO2", "2026-11-11T20:15:00Z", "spo2"),
+          "P-3004",
+          "c-sse1");
+      UUID episode = awaitEpisode(first);
+      sendAlert(
+          alertJson(
+              UUID.randomUUID(),
+              "P-3004",
+              "THRESHOLD",
+              "MEDIUM",
+              "SPO2",
+              "2026-11-11T20:16:00Z",
+              "spo2"),
+          "P-3004",
+          "c-sse2");
+      awaitOccurrences(episode, 2);
+      assertThat(postJson("/api/v1/alerts/" + episode + "/ack", "{}").statusCode()).isEqualTo(200);
+      resolver.resolveStale();
+
+      await()
+          .atMost(Duration.ofSeconds(30))
+          .until(() -> client.joined().contains("id:" + episode + ":3"));
+
+      String stream = client.joined();
+      assertThat(stream)
+          .contains("id:" + episode + ":0")
+          .contains("id:" + episode + ":1")
+          .contains("id:" + episode + ":2")
+          .contains("\"status\":\"RESOLVED\"");
     }
   }
 

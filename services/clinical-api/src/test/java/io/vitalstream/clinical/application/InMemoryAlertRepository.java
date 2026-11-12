@@ -49,7 +49,8 @@ class InMemoryAlertRepository implements AlertRepository {
     return rows.values().stream()
         .filter(a -> a.status() != AlertStatus.RESOLVED)
         .filter(a -> a.patientId().equals(patientId) && a.type() == type)
-        .filter(a -> Objects.equals(a.metric() == null ? "" : a.metric(), metric == null ? "" : metric))
+        .filter(
+            a -> Objects.equals(a.metric() == null ? "" : a.metric(), metric == null ? "" : metric))
         .findFirst()
         .map(this::withChildCount);
   }
