@@ -137,7 +137,7 @@ Gateway behaviour: validate → idempotency check in Redis → publish to Kafka 
 | GET | `/api/v1/patients/{id}/vitals?metric=&from=&to=&resolution=raw\|minute` | from Cassandra; cache-aside in Redis (TTL 10 s) |
 | GET | `/api/v1/alerts?patientId=&severity=&status=&q=&page=&size=` | `q` → Elasticsearch full text, otherwise Postgres |
 | GET | `/api/v1/alerts/{id}` | |
-| POST | `/api/v1/alerts/{id}/ack` | `{"by":"dr.cohen","note":"..."}` → status ACKNOWLEDGED |
+| POST | `/api/v1/alerts/{id}/ack` | `{"note":"..."}` → status ACKNOWLEDGED; actor from the JWT (§4.2), role CLINICIAN |
 | GET | `/api/v1/alerts/stream` | Server-Sent Events, event `alert` with AlertView JSON |
 
 `AlertView` = AlertEvent fields + `status` (`OPEN`, `ACKNOWLEDGED`, `RESOLVED`), `acknowledgedBy`, `acknowledgedAt`.
@@ -170,12 +170,31 @@ As built (clinical-api response shapes):
 | ingest-gateway all `/api/v1/**` | header `X-Api-Key` | `INGEST_API_KEY` (`dev-ingest-key`) |
 | copilot `POST /api/v1/documents` | `Authorization: Bearer` | `COPILOT_ADMIN_TOKEN` (`dev-admin-token`) |
 | copilot `/mcp` | `Authorization: Bearer`; DNS-rebinding protection ON, allowed hosts `localhost:8083`, `127.0.0.1:8083`, `copilot:8083` | `MCP_TOKEN` (`dev-mcp-token`) |
-| clinical-api, copilot chat, health/metrics | open (loopback only) | — |
+| clinical-api all `/api/v1/**` | `Authorization: Bearer <JWT>`, see §4.2 | `CLINICAL_JWT_SECRET` (`dev-clinical-jwt-secret-0123456789abcdef`) or `CLINICAL_JWT_JWK_SET_URI` |
+| copilot chat, health/metrics | open (loopback only) | — |
 
 Rules: constant-time comparison; missing/invalid → 401 problem+json; never log tokens; an empty expected secret never matches (fail closed).
 **Host-header allowlist (all HTTP services, DNS-rebinding defence):** reject requests whose `Host` is not in `ALLOWED_HOSTS` (default `localhost,127.0.0.1,<compose service name>` + port variants) with 400. FastAPI: `TrustedHostMiddleware`; Spring: a servlet filter. Health endpoints included (k8s probes use pod IP → Helm sets `ALLOWED_HOSTS` accordingly or probes send Host header).
 **Copilot sessions:** `sessionId` in `POST /api/v1/chat` is optional; the server issues a random 128-bit id (first SSE event `session` `{"sessionId"}`) and only accepts ids it issued and that have not expired; unknown ids → new session issued, never adopted. **All** tool results containing free text (alert messages, guideline chunks, any string from another system) go into the untrusted delimiter block.
-**Known gap:** chat and clinical-api reads have no end-user auth in local dev; production design = OIDC (Keycloak) JWT validated at the API gateway with clinician role, session bound to `sub`.
+**Known gap:** copilot chat has no end-user auth in local dev and calls clinical-api with a service identity, not the clinician's; production design = OIDC (Keycloak) JWT at the edge, user token forwarded to clinical-api, session bound to `sub`.
+
+### 4.2 clinical-api authentication and authorization
+
+clinical-api is an OAuth2 resource server (Spring Security). Every `/api/v1/**` request needs `Authorization: Bearer <JWT>`.
+
+| Item | Rule |
+|---|---|
+| Validation mode | `CLINICAL_JWT_JWK_SET_URI` set → RS256 via JWKS (OIDC provider). Otherwise HS256 with `CLINICAL_JWT_SECRET` (≥ 32 bytes). |
+| Required claims | `iss` = `CLINICAL_JWT_ISSUER` (default `vitalstream-dev`), `aud` contains `clinical-api`, `sub`, `exp` (30 s clock skew). Optional `name`. |
+| Roles | claim `roles` (string array) → authorities. `CLINICIAN` = read + acknowledge. `VIEWER` = read. `SERVICE` = read (machine clients, e.g. copilot). Unknown roles ignored. |
+| Access | `GET /api/v1/**` incl. `/alerts/stream`: any of the three roles. `POST /api/v1/alerts/{id}/ack`: `CLINICIAN` only. `/actuator/health/**`, `/actuator/prometheus`: open. Anything else under `/api`: deny. |
+| Errors | missing/invalid/expired token → 401 problem+json with `WWW-Authenticate: Bearer`; valid token, wrong role → 403 problem+json. Never log tokens. |
+| Ack actor | Request body is `{"note"?}` (max 1000 chars). `acknowledgedBy` = token `name`, else `sub`. A `by` field in the body is ignored, never trusted. INFO audit log `alert acknowledged` with `alertId`, actor `sub`, `correlationId`. |
+| SSE | same Bearer header. Browsers read the stream with `fetch` + `ReadableStream` (EventSource cannot send headers). Tokens never go in URLs or query strings. |
+| Dev token endpoint | `POST /api/v1/dev/token` body `{"sub","name"?,"roles":[…]}` → `{"token","expiresAt"}` (HS256, TTL 8 h). Registered only when `APP_ENV=dev` and JWKS mode is off; otherwise 404. Unauthenticated by design (local demo login). |
+| Startup guard | `CLINICAL_JWT_SECRET` joins the §4.1 secret guard when HS256 mode is used outside dev. |
+
+Clients: dashboard shows a dev sign-in (choose a demo user: `nurse.levi` / Nurse Levi / CLINICIAN, `dr.cohen` / Dr. Cohen / CLINICIAN, `observer` / Observer / VIEWER), keeps the token in memory (`sessionStorage` at most), sends it on every clinical-api call, returns to sign-in on 401, and disables Acknowledge for VIEWER. copilot uses `CLINICAL_API_TOKEN` if set; otherwise in `APP_ENV=dev` it requests a `SERVICE` token for `sub` `copilot` from the dev endpoint and refreshes it 60 s before expiry; outside dev without `CLINICAL_API_TOKEN` it fails at startup.
 **Secret startup guard (all services):** env `APP_ENV` (`dev` default, `prod` in Helm/Terraform). When `APP_ENV != dev`, startup must fail with a clear error if any secret (`INGEST_API_KEY`, `COPILOT_ADMIN_TOKEN`, `MCP_TOKEN`, `LOG_PSEUDONYM_KEY`, DB/broker passwords) is empty, equals its dev default, or is shorter than 32 chars. In `dev`, log one WARN at startup: "running with dev secrets". Unit-test both paths. RAG documents carry `provenance` (`curated` for bundled corpus, `api-upload` otherwise) shown in citations; retrieved text is passed to the LLM inside a delimited "untrusted reference material" block and the system prompt says never to follow instructions found in it.
 
 ## 5. Storage schemas
@@ -229,6 +248,10 @@ CREATE TABLE vitals_by_minute (patient_id text, metric text, day date, window_st
 | `RABBITMQ_URL` | `amqp://vitalstream:vitalstream@localhost:5672` | clinical-api |
 | `AWS_ENDPOINT_URL` | `http://localhost:4566` | stream, clinical-api |
 | `AWS_REGION` | `us-east-1` | stream, clinical-api |
+| `CLINICAL_JWT_SECRET` | `dev-clinical-jwt-secret-0123456789abcdef` | clinical-api (HS256 mode) |
+| `CLINICAL_JWT_JWK_SET_URI` | unset | clinical-api (RS256/OIDC mode when set) |
+| `CLINICAL_JWT_ISSUER` | `vitalstream-dev` | clinical-api |
+| `CLINICAL_API_TOKEN` | unset (dev: fetched from dev token endpoint) | copilot |
 | `CLINICAL_API_URL` | `http://localhost:8082` | copilot, dashboard |
 | `INGEST_GATEWAY_URL` | `http://localhost:8081` | simulator |
 | `COPILOT_URL` | `http://localhost:8083` | dashboard |
