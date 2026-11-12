@@ -139,6 +139,7 @@ Gateway behaviour: validate → idempotency check in Redis → publish to Kafka 
 | GET | `/api/v1/alerts/{id}` | |
 | POST | `/api/v1/alerts/{id}/ack` | `{"note":"..."}` → status ACKNOWLEDGED; actor from the JWT (§4.2), role CLINICIAN |
 | GET | `/api/v1/alerts/stream` | Server-Sent Events, event `alert` with AlertView JSON |
+| GET | `/api/v1/me` | `{sub, name, roles}` of the caller's token (any role); used by dashboard and copilot (§4.2) |
 
 `AlertView` = AlertEvent fields + `status` (`OPEN`, `ACKNOWLEDGED`, `RESOLVED`), `acknowledgedBy`, `acknowledgedAt`.
 
@@ -157,7 +158,7 @@ As built (clinical-api response shapes):
 ### copilot (8083)
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/api/v1/chat` | `{"sessionId","patientId"?,"message"}` → SSE stream: events `token`, `tool_call`, `citation`, `done` |
+| POST | `/api/v1/chat` | `{"sessionId","patientId"?,"message"}` → SSE stream: events `token`, `tool_call`, `citation`, `done`. Requires the user's clinical-api JWT (§4.2) |
 | POST | `/api/v1/documents` | ingest markdown guideline(s) into RAG store |
 | GET | `/api/v1/documents/search?q=&k=` | hybrid search debug endpoint |
 | — | (as built) | SSE order: `session` `{sessionId}` → `tool_call` twice per call (`status: running`, then `ok`/`error`) → `citation` `{title, chunkId, provenance}` → `token`… → `done` `{sessionId, correlationId, toolCalls, usage, error?}` (failure = `done` with `error:true`, no separate error event). `POST /api/v1/documents` body `{"documents":[{"title"?,"source"?,"content"}]}`. `ALLOWED_HOSTS` matches host names only (Starlette ignores ports). `done.usage` = `{inputTokens, outputTokens}` (fake LLM reports 0 output tokens). |
@@ -171,12 +172,13 @@ As built (clinical-api response shapes):
 | copilot `POST /api/v1/documents` | `Authorization: Bearer` | `COPILOT_ADMIN_TOKEN` (`dev-admin-token`) |
 | copilot `/mcp` | `Authorization: Bearer`; DNS-rebinding protection ON, allowed hosts `localhost:8083`, `127.0.0.1:8083`, `copilot:8083` | `MCP_TOKEN` (`dev-mcp-token`) |
 | clinical-api all `/api/v1/**` | `Authorization: Bearer <JWT>`, see §4.2 | `CLINICAL_JWT_SECRET` (`dev-clinical-jwt-secret-0123456789abcdef`) or `CLINICAL_JWT_JWK_SET_URI` |
-| copilot chat, health/metrics | open (loopback only) | — |
+| copilot `POST /api/v1/chat` | `Authorization: Bearer <clinical-api JWT>` (the end user's), see §4.2 | — |
+| health/metrics | open (loopback only) | — |
 
 Rules: constant-time comparison; missing/invalid → 401 problem+json; never log tokens; an empty expected secret never matches (fail closed).
 **Host-header allowlist (all HTTP services, DNS-rebinding defence):** reject requests whose `Host` is not in `ALLOWED_HOSTS` (default `localhost,127.0.0.1,<compose service name>` + port variants) with 400. FastAPI: `TrustedHostMiddleware`; Spring: a servlet filter. Health endpoints included (k8s probes use pod IP → Helm sets `ALLOWED_HOSTS` accordingly or probes send Host header).
 **Copilot sessions:** `sessionId` in `POST /api/v1/chat` is optional; the server issues a random 128-bit id (first SSE event `session` `{"sessionId"}`) and only accepts ids it issued and that have not expired; unknown ids → new session issued, never adopted. **All** tool results containing free text (alert messages, guideline chunks, any string from another system) go into the untrusted delimiter block.
-**Known gap:** copilot chat has no end-user auth in local dev and calls clinical-api with a service identity, not the clinician's; production design = OIDC (Keycloak) JWT at the edge, user token forwarded to clinical-api, session bound to `sub`.
+**Known gap:** no per-patient or per-ward scoping yet: any authenticated role can read every patient. The dev token endpoint is the only login locally; production = OIDC provider (Keycloak / Cognito) via `CLINICAL_JWT_JWK_SET_URI`.
 
 ### 4.2 clinical-api authentication and authorization
 
@@ -194,7 +196,10 @@ clinical-api is an OAuth2 resource server (Spring Security). Every `/api/v1/**` 
 | Dev token endpoint | `POST /api/v1/dev/token` body `{"sub","name"?,"roles":[…]}` → `{"token","expiresAt"}` (HS256, TTL 8 h). Registered only when `APP_ENV=dev` and JWKS mode is off; otherwise 404. Unauthenticated by design (local demo login). |
 | Startup guard | `CLINICAL_JWT_SECRET` joins the §4.1 secret guard when HS256 mode is used outside dev. |
 
-Clients: dashboard shows a dev sign-in (choose a demo user: `nurse.levi` / Nurse Levi / CLINICIAN, `dr.cohen` / Dr. Cohen / CLINICIAN, `observer` / Observer / VIEWER), keeps the token in memory (`sessionStorage` at most), sends it on every clinical-api call, returns to sign-in on 401, and disables Acknowledge for VIEWER. copilot uses `CLINICAL_API_TOKEN` if set; otherwise in `APP_ENV=dev` it requests a `SERVICE` token for `sub` `copilot` from the dev endpoint and refreshes it 60 s before expiry; outside dev without `CLINICAL_API_TOKEN` it fails at startup.
+Clients:
+- **dashboard:** dev sign-in (choose a demo user: `nurse.levi` / Nurse Levi / CLINICIAN, `dr.cohen` / Dr. Cohen / CLINICIAN, `observer` / Observer / VIEWER), shows the user from `GET /api/v1/me`, keeps the token in memory (`sessionStorage` at most), sends it on every clinical-api **and copilot chat** call, returns to sign-in on 401, disables Acknowledge for VIEWER.
+- **copilot chat (no confused deputy):** `POST /api/v1/chat` requires `Authorization: Bearer <clinical-api JWT>`. Before any LLM or tool call, copilot calls `GET /api/v1/me` on clinical-api with that token; 401/403 there → copilot answers the same status as problem+json and does no LLM call. Every tool call made for that chat forwards **the user's token**, never a service token, so clinical-api enforces the user's own access. Sessions are bound to `sub`: a `sessionId` issued to another `sub` is not accepted (a new session is issued). The token is never logged and never placed in the LLM prompt or tool results.
+- **copilot MCP (`/mcp`, `MCP_TOKEN`):** a trusted integration channel with no end user; its tool calls use a `SERVICE` identity: `CLINICAL_API_TOKEN` if set, otherwise in `APP_ENV=dev` a `SERVICE` token for `sub` `copilot-mcp` from the dev endpoint, refreshed 60 s before expiry; outside dev without `CLINICAL_API_TOKEN` copilot fails at startup. The SERVICE identity is used **only** by `/mcp`.
 **Secret startup guard (all services):** env `APP_ENV` (`dev` default, `prod` in Helm/Terraform). When `APP_ENV != dev`, startup must fail with a clear error if any secret (`INGEST_API_KEY`, `COPILOT_ADMIN_TOKEN`, `MCP_TOKEN`, `LOG_PSEUDONYM_KEY`, DB/broker passwords) is empty, equals its dev default, or is shorter than 32 chars. In `dev`, log one WARN at startup: "running with dev secrets". Unit-test both paths. RAG documents carry `provenance` (`curated` for bundled corpus, `api-upload` otherwise) shown in citations; retrieved text is passed to the LLM inside a delimited "untrusted reference material" block and the system prompt says never to follow instructions found in it.
 
 ## 5. Storage schemas
