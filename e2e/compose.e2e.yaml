@@ -1,0 +1,36 @@
+# e2e-only overrides, merged last by e2e/src/vitalstream_e2e/stack.py (paths relative to the repo root).
+# Heap caps follow CONTRIBUTING section 7: Docker memory is shared between parallel workers.
+services:
+  # services/stream-processor/compose.yaml declares `context: .`, which resolves to the repo root
+  # under `--project-directory .`; the Dockerfile lives in the service directory.
+  # Its fragment also names the shared network under the key `default`, while every other file uses
+  # the key `vitalstream`; compose then refuses to adopt the network ("incorrect label"). Attaching
+  # the service to the `vitalstream` key resolves it.
+  stream-processor:
+    networks: [vitalstream]
+    build:
+      context: services/stream-processor
+    environment:
+      SPARK_DRIVER_MEMORY: 1g
+    mem_limit: 2g
+
+  ingest-gateway:
+    environment:
+      JAVA_TOOL_OPTIONS: -Xms128m -Xmx384m
+    mem_limit: 640m
+
+  clinical-api:
+    environment:
+      JAVA_TOOL_OPTIONS: -Xms128m -Xmx512m
+    mem_limit: 768m
+
+  copilot:
+    mem_limit: 1g
+
+  dashboard:
+    mem_limit: 128m
+
+networks:
+  vitalstream:
+    name: vitalstream
+    external: false
