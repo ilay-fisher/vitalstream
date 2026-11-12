@@ -6,7 +6,11 @@ Importable workflow that escalates CRITICAL alerts nobody has acknowledged.
 flowchart LR
     Q[RabbitMQ trigger<br/>queue notify.critical] --> F{severity = CRITICAL}
     F -- yes --> W[Wait N minutes]
-    W --> G[GET clinical-api<br/>/api/v1/alerts/id]
+    W --> T{CLINICAL_API_TOKEN set}
+    T -- yes --> U[Set token from env]
+    T -- no, dev only --> D[POST /api/v1/dev/token<br/>sub n8n, role SERVICE] --> V[Set token]
+    U --> G[GET clinical-api<br/>/api/v1/alerts/id<br/>Authorization: Bearer]
+    V --> G
     G --> O{status = OPEN}
     O -- yes --> P[POST ESCALATION_WEBHOOK_URL]
     P --> L1[Set: log ESCALATED]
@@ -17,7 +21,8 @@ flowchart LR
 
 * clinical-api publishes each alert to the topic exchange `alerts.notify` with routing key `alert.<severity>` (CONTRACTS section 5). The queue `notify.critical` is bound to `alert.critical`, so the trigger consumes only CRITICAL alerts; the IF node re-checks `severity` anyway so a rebinding cannot escalate a lower severity.
 * The message body is the `AlertView` JSON; the trigger parses it (`jsonParseBody`, `onlyContent`).
-* After the wait the alert is re-read from `GET /api/v1/alerts/{alertId}` (the ack endpoint changes `status` to `ACKNOWLEDGED`). Only `OPEN` alerts escalate. The request carries `X-Correlation-Id: n8n-escalation-<alertId>`.
+* After the wait the alert is re-read from `GET /api/v1/alerts/{alertId}` (the ack endpoint changes `status` to `ACKNOWLEDGED`). Only `OPEN` alerts escalate. The request carries `X-Correlation-Id: n8n-escalation-<alertId>` and `Authorization: Bearer <token>`: clinical-api requires a JWT (CONTRACTS section 4.2) and any role may read, so a `SERVICE` token is enough.
+* Where the token comes from: the env var `CLINICAL_API_TOKEN` when it is set (the way to run anywhere but a developer machine). Otherwise a preceding node asks clinical-api's dev endpoint `POST /api/v1/dev/token` for a `SERVICE` token for sub `n8n`; that endpoint only exists with `APP_ENV=dev` and no JWKS, so elsewhere the workflow fails at that node rather than working without credentials. No token is stored in the workflow file. The token is a field of the node output, so it is visible in the execution data of the n8n UI; treat access to n8n accordingly.
 * The queue message is acknowledged when the execution finishes, so a crash while waiting redelivers the alert (the DLX `alerts.notify.dlx` takes over after rejects).
 * Nodes used: RabbitMQ Trigger, IF, Wait, HTTP Request, Set. `executeCommand`, `ssh` and `code` are in `NODES_EXCLUDE` (infra/compose.yaml) and are not used.
 * "Log" is the Set node `log` field: n8n stores it in the execution data (Executions tab), which is the audit trail. A failed webhook POST does not fail the run (`onError: continueRegularOutput`); the log line says `failed (...)`.
@@ -29,8 +34,9 @@ flowchart LR
 | `ESCALATION_WAIT_MINUTES` | `5` | Minutes to wait before re-checking the alert |
 | `ESCALATION_WEBHOOK_URL` | empty (placeholder) | Where to POST the escalation. No real endpoint is shipped; while empty the POST fails and the log says so |
 | `CLINICAL_API_URL` | `http://clinical-api:8082` | clinical-api base URL inside the `vitalstream` network |
+| `CLINICAL_API_TOKEN` | empty | JWT (role `SERVICE`, `aud` `clinical-api`) for clinical-api. Empty: the workflow fetches a dev token (dev only). `infra/compose.yaml` passes it from the host environment: `CLINICAL_API_TOKEN=... make infra-up PROFILES=tools` |
 
-`infra/compose.yaml` does not pass these through; set them with an override file of your own (for example `docker compose ... -f my-n8n.override.yaml`) or accept the defaults.
+`infra/compose.yaml` passes only `CLINICAL_API_TOKEN` through; set the others with an override file of your own (for example `docker compose ... -f my-n8n.override.yaml`) or accept the defaults.
 
 ## Import into the running n8n
 
@@ -61,7 +67,9 @@ $ docker exec vitalstream-n8n n8n list:workflow
 vs-critical-alert-escalation|critical-alert-escalation
 ```
 
-`e2e/tests/unit/test_delivery_files.py` additionally checks that no excluded node type is used and that every connection points at an existing node.
+After the authentication change the workflow was re-imported the same way into a fresh `vitalstream-n8n` container: `Successfully imported 1 workflow.` and `n8n list:workflow` shows it.
+
+`e2e/tests/unit/test_delivery_files.py` additionally checks that no excluded node type is used, that every connection points at an existing node, that the clinical-api request carries `Authorization: Bearer {{ $json.token }}` fed by both token sources, that the dev fetch asks for sub `n8n` with role `SERVICE`, that no JWT is committed, and that the compose n8n service passes `CLINICAL_API_TOKEN`.
 
 ### Canvas screenshot (`docs/images/n8n-escalation.png`)
 
