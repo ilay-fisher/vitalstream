@@ -291,8 +291,8 @@ sequenceDiagram
   participant B as Nurse B
   participant API as clinical-api
   participant DB as Postgres
-  A->>API: POST /alerts/42/ack {by, note}
-  B->>API: POST /alerts/42/ack {by, note}
+  A->>API: POST /alerts/42/ack {note} + Bearer JWT (CLINICIAN)
+  B->>API: POST /alerts/42/ack {note} + Bearer JWT (CLINICIAN)
   API->>DB: read alert (version 0, OPEN)
   API->>DB: UPDATE … SET status='ACKNOWLEDGED', version=1 WHERE id=42 AND version=0
   DB-->>API: 1 row
@@ -450,6 +450,11 @@ else: deny, Retry-After = (1 − tokens) / rate</div>
   <div class="grid2">
     <article class="card"><h3>Controls in place</h3><ul>
       <li>Gateway: X-Api-Key, fail closed on the decoded, semicolon-stripped path; ambiguous URIs get 400.</li>
+      <li>clinical-api: OAuth2 resource server. Validates signature (HS256 dev secret, or RS256 from a JWKS URI), <code>iss</code>, <code>aud</code> = clinical-api, <code>sub</code>, <code>exp</code> with 30 s skew. 401 with <code>WWW-Authenticate: Bearer</code>, 403 problem+json.</li>
+      <li>Roles: CLINICIAN reads and acknowledges; VIEWER and SERVICE read only. The ack actor comes from the token (<code>name</code>, else <code>sub</code>), never from the body, and every ack is audit-logged.</li>
+      <li>Dev sign-in: <code>POST /api/v1/dev/token</code> exists only when <code>APP_ENV=dev</code> and no JWKS is set; elsewhere the bean is not registered, so the route is a plain 404.</li>
+      <li>Dashboard: bearer header on every call; the live feed uses fetch + ReadableStream, so no token ever sits in a URL or access log.</li>
+      <li>Copilot chat: requires the user's JWT, checks it with <code>GET /api/v1/me</code> before any LLM call, forwards the same token on tool calls and binds sessions to <code>sub</code>. The SERVICE token is used only by <code>/mcp</code>.</li>
       <li>Copilot documents and MCP: constant-time bearer token check.</li>
       <li>Host allowlist (<code>ALLOWED_HOSTS</code>) against DNS rebinding.</li>
       <li><code>APP_ENV</code> guard: outside dev, secrets must be ≥ 32 chars and not defaults.</li>
@@ -468,6 +473,9 @@ else: deny, Retry-After = (1 − tokens) / rate</div>
   <div class="grid2">
     <article class="card finding"><span class="sev crit">High · fixed</span><h3>Gateway auth bypass</h3><p>The filter matched the raw URI. <code>/api/v1;x=1/vitals/batch</code> and <code>/%61pi/v1/…</code> returned 202 without a key. Fixed by deciding on the decoded, normalised path and rejecting ambiguous ones; regression tests for each variant.</p></article>
     <article class="card finding"><span class="sev crit">High · fixed</span><h3>Watermark poisoning</h3><p>A single far-future timestamp could freeze alerting for every patient. Fixed with the event-time guard before the watermark, plus the gateway's 5-minute future limit.</p></article>
+    <article class="card finding"><span class="sev crit">High · fixed</span><h3>Unauthenticated clinical record</h3><p>clinical-api served alerts, vitals and acknowledgements to anyone who could reach port 8082, and the ack body carried a free-text <code>by</code> field, so any caller could sign as any nurse. Fixed with JWT validation, roles, and the actor taken from the token.</p></article>
+    <article class="card finding"><span class="sev crit">High · fixed</span><h3>Confused deputy in copilot</h3><p>The first auth contract (mine) gave copilot a SERVICE token for its tool calls while chat stayed open. Anyone could ask copilot to read patient data with copilot's privileges. Fixed by requiring the user's JWT on chat and forwarding it; the SERVICE token stays on <code>/mcp</code>.</p></article>
+    <article class="card finding medium"><span class="sev high">Medium · fixed</span><h3>Token in n8n execution data</h3><p>The escalation workflow stored the fetched bearer token in a Set node, so it landed in n8n's saved execution history. Fixed by reading it inline in the request header and turning execution saving off.</p></article>
     <article class="card finding medium"><span class="sev high">Medium · fixed</span><h3>Open pod egress</h3><p>NetworkPolicy allowed 0.0.0.0/0, which includes the cloud metadata service and the cluster. Now excludes RFC1918, link-local, CGNAT and cluster CIDRs, and is off for services that need no internet.</p></article>
     <article class="card finding medium"><span class="sev high">Medium · fixed</span><h3>Terraform defaults</h3><p>Public EKS API from anywhere, Redis without AUTH, MSK without client auth, node IMDS reachable from pods (IRSA bypass). All four closed, each with a failing <code>terraform test</code> first.</p></article>
   </div>
@@ -504,6 +512,8 @@ flowchart LR
     <figure><img src="images/dashboard-ward-light.png" alt="Ward overview: 20 patient cards sorted by NEWS2, two high-risk patients at the top" loading="lazy" width="1440" height="900"><figcaption>Ward overview sorted by NEWS2. Sepsis scenario patient at the top with score 12.</figcaption></figure>
     <figure><img src="images/dashboard-patient-dark.png" alt="Patient detail in dark mode: six vital charts trending toward deterioration and alert history" loading="lazy" width="1440" height="900"><figcaption>Patient detail: six vitals over an hour, normal bands shaded, alert history with acknowledgement.</figcaption></figure>
     <figure><img src="images/dashboard-copilot-live.png" alt="Copilot panel answering with cited NEWS2 guideline chunks" loading="lazy" width="1440" height="900"><figcaption>Copilot against the real service: cited guideline chunks and token usage.</figcaption></figure>
+    <figure><img src="images/dashboard-signin.png" alt="Dev sign-in screen with a choice of clinician or viewer identity" loading="lazy" width="1440" height="900"><figcaption>Dev sign-in: three demo users; the dashboard gets an 8-hour JWT from clinical-api's dev-only token endpoint and keeps it for that tab only.</figcaption></figure>
+    <figure><img src="images/dashboard-alerts-viewer.png" alt="Alert feed signed in as a viewer: acknowledge buttons disabled, acknowledged rows show the clinician's name" loading="lazy" width="1440" height="900"><figcaption>Signed in as a viewer: acknowledge is disabled, and each ack shows the name taken from the clinician's token.</figcaption></figure>
   </div>
 </section>
 
@@ -512,7 +522,7 @@ flowchart LR
   <div class="tbl"><table>
     <thead><tr><th>Area</th><th>Decision or gap</th><th>Production answer</th></tr></thead>
     <tbody>
-      <tr><td>End-user auth</td><td>Service keys and bearer tokens only; no clinician identity.</td><td>OIDC (Keycloak / Cognito), JWT at the edge, role-based ack, audit log per user.</td></tr>
+      <tr><td>End-user auth</td><td>clinical-api validates JWTs with roles and per-user audit; locally a dev endpoint mints HS256 tokens. Any CLINICIAN can see every patient.</td><td>OIDC provider (Keycloak / Cognito) through the existing JWKS setting, short tokens with refresh, and ward / care-team scoping on every read.</td></tr>
       <tr><td>Detection</td><td>Window results are collected to the driver each micro-batch to run detectors.</td><td>Move detectors into <code>mapGroupsWithState</code> / pandas UDFs so they scale with executors.</td></tr>
       <tr><td>EWMA noise</td><td>|z| ≥ 3 alerts on ~0.3% of normal windows.</td><td>Require persistence (k of n windows), per-metric thresholds, clinician feedback loop.</td></tr>
       <tr><td>Outbox</td><td>Failing rows retry forever; relay transaction spans sink calls.</td><td>Attempt counter + backoff + parking table; claim rows, commit, then call sinks.</td></tr>
@@ -556,7 +566,9 @@ flowchart LR
   <details class="qa"><summary>How do you stop the copilot from hallucinating numbers?</summary><p>It does not invent vitals: numbers come from tool calls against clinical-api, and NEWS2 comes from a deterministic tool. Guidance comes from retrieved, curated documents with citations. The agent is capped at 6 steps, and the default provider is a deterministic fake so tests are stable.</p></details>
   <details class="qa"><summary>Two nurses acknowledge the same alert at once. What happens?</summary><p>Each request reads the alert and runs <code>UPDATE … WHERE id = ? AND version = ?</code>. Exactly one update matches; that request gets 200 with the new version. The other gets 409 problem+json, and the dashboard shows who acknowledged it.</p></details>
   <details class="qa"><summary>What is a NetworkPolicy egress gap and why did it matter?</summary><p>Allowing egress to 0.0.0.0/0 also allows the cloud metadata endpoint and every pod in the cluster. A compromised pod could read node credentials or move sideways. The fix excludes private, link-local and cluster ranges, and turns internet egress off for services that do not need it. Combined with IMDSv2 hop limit 1, node credentials are out of reach.</p></details>
-  <details class="qa"><summary>What would you change first for production?</summary><p>Clinician identity through OIDC with role-based acknowledgement and an audit trail; bounded outbox retries with a parking table; SSE replay from Postgres; MSK IAM and TLS Redis in the services; detectors moved off the Spark driver.</p></details>
+  <details class="qa"><summary>How does the copilot call clinical-api without becoming a confused deputy?</summary><p>It acts as the user, not as itself. Chat requires the user's JWT; copilot checks it with <code>/api/v1/me</code> before spending any LLM tokens, then forwards the same token on every tool call, so clinical-api applies that user's role. The service's own token is used only by the MCP endpoint, which has its own bearer check. My first contract got this wrong; review caught it.</p></details>
+  <details class="qa"><summary>Why take the acknowledging nurse from the token instead of the request body?</summary><p>A body field is whatever the caller types, so anyone could sign as anyone. The token's <code>name</code> or <code>sub</code> is signed by the issuer. The API ignores any <code>by</code> field and writes the actor and alert to an audit log.</p></details>
+  <details class="qa"><summary>What would you change first for production?</summary><p>Plug a real OIDC provider into the JWKS setting and add ward / care-team scoping, since today any clinician sees every patient; bounded outbox retries with a parking table; SSE replay from Postgres; MSK IAM and TLS Redis in the services; detectors moved off the Spark driver.</p></details>
 </section>
 
 <p class="foot">VitalStream is a portfolio system with synthetic patients. It is not a medical device and its guidance is not clinical advice.</p>
