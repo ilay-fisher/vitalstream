@@ -54,7 +54,8 @@ class AlertIngestServiceTest {
             new DirectUnitOfWork(),
             new OutboxPayloads(JsonMapper.builder().build()),
             Clock.fixed(Instant.parse("2026-11-11T20:20:00Z"), ZoneOffset.UTC),
-            meters);
+            meters,
+            Duration.ofMinutes(5));
   }
 
   private static AlertEvent event(AlertType type, Severity severity, String metric, int minute) {
@@ -166,6 +167,60 @@ class AlertIngestServiceTest {
     service.ingest(event(AlertType.TREND_ZSCORE, Severity.MEDIUM, "HEART_RATE", 0), "c");
 
     assertThat(alerts.all()).hasSize(3);
+  }
+
+  // ---- staleness (CONTRACTS section 3.4, "Staleness") -------------------------------------
+
+  private double skippedAsStale() {
+    return meters.counter("vitalstream.alert.notifications.skipped", "reason", "stale").count();
+  }
+
+  @Test
+  void staleDetectionOpensTheEpisodeButNeverNotifies() {
+    // window ends 20:06, clock is 20:20: older than the 5 minute threshold
+    AlertEvent stale = hr(Severity.CRITICAL, -10);
+
+    AlertIngestService.Outcome outcome = service.ingest(stale, "c");
+
+    assertThat(outcome).isEqualTo(AlertIngestService.Outcome.OPENED);
+    UUID id = alerts.all().getFirst().id();
+    assertThat(outboxTypesFor(id)).containsExactly(OutboxEventType.ALERT_INDEX);
+    assertThat(published()).extracting(AlertView::alertId).containsExactly(id);
+    assertThat(skippedAsStale()).isEqualTo(1.0);
+    verifyNoInteractions(suppression);
+    assertThat(
+            meters
+                .counter("vitalstream_alert_episodes", "event", "opened", "type", "THRESHOLD")
+                .count())
+        .isEqualTo(1.0);
+  }
+
+  @Test
+  void staleEscalationIsSkippedAndCountedOnce() {
+    service.ingest(hr(Severity.MEDIUM, -10), "c");
+
+    service.ingest(hr(Severity.CRITICAL, -9), "c");
+
+    UUID id = alerts.all().getFirst().id();
+    assertThat(outboxTypesFor(id)).containsOnly(OutboxEventType.ALERT_INDEX).hasSize(2);
+    assertThat(skippedAsStale()).isEqualTo(2.0);
+  }
+
+  @Test
+  void episodeExactlyAtTheThresholdStillNotifies() {
+    // clock 20:20 - 5 min = 20:15; minute -1 ends at 20:15:00
+    service.ingest(hr(Severity.HIGH, -1), "c");
+
+    assertThat(outboxTypesFor(alerts.all().getFirst().id()))
+        .containsExactly(OutboxEventType.ALERT_INDEX, OutboxEventType.ALERT_NOTIFY);
+    assertThat(skippedAsStale()).isZero();
+  }
+
+  @Test
+  void freshDetectionsDoNotTouchTheStaleCounter() {
+    service.ingest(hr(Severity.HIGH, 0), "c");
+
+    assertThat(skippedAsStale()).isZero();
   }
 
   // ---- update / idempotency ---------------------------------------------------------------
@@ -472,7 +527,8 @@ class AlertIngestServiceTest {
             new DirectUnitOfWork(),
             new OutboxPayloads(JsonMapper.builder().build()),
             Clock.fixed(Instant.parse("2026-11-11T20:20:00Z"), ZoneOffset.UTC),
-            meters);
+            meters,
+            Duration.ofMinutes(5));
 
     AlertIngestService.Outcome outcome = racingService.ingest(hr(Severity.HIGH, 1), "c");
 

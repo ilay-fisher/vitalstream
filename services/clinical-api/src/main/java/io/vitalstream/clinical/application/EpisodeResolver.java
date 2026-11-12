@@ -92,6 +92,7 @@ public class EpisodeResolver {
     if (resolved.isEmpty()) {
       return new Resolution(List.of(), List.of(), List.of());
     }
+    Instant staleBefore = now.minus(resolveAfter);
     Set<UUID> resolvedIds = new LinkedHashSet<>();
     resolved.forEach(r -> resolvedIds.add(r.id()));
 
@@ -113,9 +114,12 @@ public class EpisodeResolver {
       AlertView view = AlertView.from(stored);
       boolean wasUnlinked = unlinked.contains(id);
       EpisodeChange change = wasUnlinked ? EpisodeChange.UNLINKED : EpisodeChange.UPDATED;
+      if (DeliveryPlanner.skippedAsStale(stored, change, staleBefore)) {
+        StaleNotifications.skipped(meters, stored);
+      }
       boolean suppressed =
-          DeliveryPlanner.notifies(stored, change) && !claimNotificationWindow(stored);
-      for (OutboxEventType type : DeliveryPlanner.plan(stored, change, suppressed)) {
+          DeliveryPlanner.notifies(stored, change, staleBefore) && !claimNotificationWindow(stored);
+      for (OutboxEventType type : DeliveryPlanner.plan(stored, change, suppressed, staleBefore)) {
         effects.enqueue(type, view, correlationId);
       }
       if (wasUnlinked) {

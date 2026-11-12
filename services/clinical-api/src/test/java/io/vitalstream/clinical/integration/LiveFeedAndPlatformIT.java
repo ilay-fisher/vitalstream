@@ -3,7 +3,6 @@ package io.vitalstream.clinical.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
-import io.vitalstream.clinical.application.EpisodeResolver;
 import io.vitalstream.clinical.application.OutboxEntry;
 import io.vitalstream.clinical.application.OutboxRepository;
 import io.vitalstream.clinical.domain.OutboxEventType;
@@ -30,7 +29,6 @@ class LiveFeedAndPlatformIT extends IntegrationTestBase {
   @Autowired StringRedisTemplate redis;
   @Autowired OutboxRepository outbox;
   @Autowired TransactionTemplate tx;
-  @Autowired EpisodeResolver resolver;
 
   /** Opens {@code /api/v1/alerts/stream} and collects raw lines until closed. */
   private SseClient openStream() throws Exception {
@@ -116,7 +114,7 @@ class LiveFeedAndPlatformIT extends IntegrationTestBase {
           "c-sse2");
       awaitOccurrences(episode, 2);
       assertThat(postJson("/api/v1/alerts/" + episode + "/ack", "{}").statusCode()).isEqualTo(200);
-      resolver.resolveStale();
+      resolver().resolveStale();
 
       await()
           .atMost(Duration.ofSeconds(30))

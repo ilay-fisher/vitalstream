@@ -4,13 +4,22 @@ import static org.awaitility.Awaitility.await;
 
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.GetResponse;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.vitalstream.clinical.application.AlertIngestService;
 import io.vitalstream.clinical.application.AlertRepository;
+import io.vitalstream.clinical.application.EpisodeResolver;
+import io.vitalstream.clinical.application.LiveFeedPublisher;
+import io.vitalstream.clinical.application.OutboxPayloads;
+import io.vitalstream.clinical.application.OutboxRepository;
+import io.vitalstream.clinical.application.SuppressionStore;
+import io.vitalstream.clinical.application.UnitOfWork;
 import io.vitalstream.clinical.infrastructure.security.TestTokens;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -65,14 +74,55 @@ abstract class IntegrationTestBase {
     r.add("vitalstream.sse.heartbeat-ms", () -> "1000");
     // test windows are in the past: a running resolver would close every episode within a minute
     r.add("vitalstream.episodes.resolve-interval-ms", () -> "3600000");
+    // ... and, for the same reason, must not make every test detection "stale" (no paging); tests
+    // of the stale-notification rule and of resolution build their services with REALISTIC_SILENCE
+    r.add("vitalstream.episodes.resolve-after", () -> "P3650D");
   }
 
   @Value("${local.server.port}")
   protected int port;
 
+  /** ALERT_RESOLVE_AFTER of production; the context itself runs with a huge value (see above). */
+  protected static final Duration REALISTIC_SILENCE = Duration.ofMinutes(5);
+
   @Autowired protected JdbcClient jdbc;
+  @Autowired private OutboxRepository outboxRepository;
+  @Autowired private SuppressionStore suppressionStore;
+  @Autowired private LiveFeedPublisher liveFeedPublisher;
+  @Autowired private UnitOfWork unitOfWork;
+  @Autowired private OutboxPayloads outboxPayloads;
+  @Autowired private Clock clock;
+  @Autowired private MeterRegistry meterRegistry;
 
   @MockitoSpyBean protected AlertRepository alertRepository;
+
+  /** The wired resolver collaborators with the production silence period. */
+  protected EpisodeResolver resolver() {
+    return new EpisodeResolver(
+        alertRepository,
+        outboxRepository,
+        suppressionStore,
+        liveFeedPublisher,
+        unitOfWork,
+        outboxPayloads,
+        clock,
+        meterRegistry,
+        REALISTIC_SILENCE);
+  }
+
+  /** The wired intake collaborators with the production silence period. */
+  protected AlertIngestService ingestService() {
+    return new AlertIngestService(
+        alertRepository,
+        outboxRepository,
+        suppressionStore,
+        liveFeedPublisher,
+        unitOfWork,
+        outboxPayloads,
+        clock,
+        meterRegistry,
+        REALISTIC_SILENCE);
+  }
 
   protected final HttpClient http = HttpClient.newHttpClient();
 

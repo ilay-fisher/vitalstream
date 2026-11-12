@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import io.micrometer.core.instrument.MeterRegistry;
-import io.vitalstream.clinical.application.EpisodeResolver;
 import java.time.Duration;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -17,7 +16,6 @@ import tools.jackson.databind.json.JsonMapper;
  */
 class EpisodeResolverIT extends IntegrationTestBase {
 
-  @Autowired EpisodeResolver resolver;
   @Autowired MeterRegistry meters;
   @Autowired org.springframework.data.redis.core.StringRedisTemplate redis;
 
@@ -43,7 +41,7 @@ class EpisodeResolverIT extends IntegrationTestBase {
             "stale bradycardia");
     assertThat(rabbitMessagesFor(episode, Duration.ofSeconds(8))).hasSize(1);
 
-    resolver.resolveStale();
+    resolver().resolveStale();
 
     var view = json.readTree(get("/api/v1/alerts/" + episode).body());
     assertThat(view.path("status").asString()).isEqualTo("RESOLVED");
@@ -73,7 +71,7 @@ class EpisodeResolverIT extends IntegrationTestBase {
   @Test
   void aDetectionAfterResolutionOpensANewEpisodeThatNotifiesAgain() throws Exception {
     UUID old = send("P-4002", "THRESHOLD", "HIGH", "SPO2", "2026-11-11T20:15:00Z", "desaturation");
-    resolver.resolveStale();
+    resolver().resolveStale();
     assertThat(
             jdbc.sql("SELECT status FROM clinical.alerts WHERE id = :id")
                 .param("id", old)
@@ -102,8 +100,8 @@ class EpisodeResolverIT extends IntegrationTestBase {
 
     assertThat(rabbitMessagesFor(child, Duration.ofSeconds(3))).as("quiet while grouped").isEmpty();
 
-    resolver.resolveStale();
-    resolver.resolveStale();
+    resolver().resolveStale();
+    resolver().resolveStale();
 
     assertThat(rabbitMessagesFor(child, Duration.ofSeconds(8)))
         .as("pages once when unlinked")
@@ -119,8 +117,8 @@ class EpisodeResolverIT extends IntegrationTestBase {
   void runningTheResolverRepeatedlyIsHarmless() {
     UUID episode = send("P-4004", "ML_ANOMALY", "MEDIUM", null, "2026-11-11T20:15:00Z", "anomaly");
 
-    resolver.resolveStale();
-    resolver.resolveStale();
+    resolver().resolveStale();
+    resolver().resolveStale();
 
     assertThat(
             jdbc.sql("SELECT version FROM clinical.alerts WHERE id = :id")
@@ -140,7 +138,7 @@ class EpisodeResolverIT extends IntegrationTestBase {
         .param("id", child)
         .update();
 
-    resolver.resolveStale();
+    resolver().resolveStale();
 
     assertThat(rabbitMessagesFor(child, Duration.ofSeconds(5))).isEmpty();
     assertThat(json.readTree(get("/api/v1/alerts/" + child).body()).path("parentAlertId").isNull())
