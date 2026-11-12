@@ -6,11 +6,25 @@ Clinician web UI for VitalStream: ward overview, patient detail with charts, ale
 | --------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------- |
 | ![ward](../../docs/images/dashboard-ward-light.png) | ![patient](../../docs/images/dashboard-patient-light.png) | ![alerts](../../docs/images/dashboard-alerts-light.png) | ![copilot](../../docs/images/dashboard-copilot-light.png) |
 
+## Sign in and roles
+
+clinical-api requires a bearer token (CONTRACTS 4.2), so the dashboard opens on a dev sign-in screen with the three demo users:
+
+| User       | `sub`        | Role        | Can acknowledge      |
+| ---------- | ------------ | ----------- | -------------------- |
+| Nurse Levi | `nurse.levi` | `CLINICIAN` | yes                  |
+| Dr. Cohen  | `dr.cohen`   | `CLINICIAN` | yes                  |
+| Observer   | `observer`   | `VIEWER`    | no (button disabled) |
+
+![sign-in](../../docs/images/dashboard-signin.png)
+
+Choosing a user calls `POST /clinical-api/api/v1/dev/token`, which only exists when clinical-api runs with `APP_ENV=dev` and no JWKS (otherwise sign-in explains that it is unavailable). The token is held in memory and `sessionStorage` (gone when the tab closes), never in `localStorage`, and is sent as `Authorization: Bearer` on every clinical-api call, including the alert SSE stream (`fetch` + `ReadableStream`, so it never appears in a URL). A 401 from the API, or the token's 8 h expiry, returns to the sign-in screen with a notice. The user shown after sign-in is what `GET /clinical-api/api/v1/me` reports for the token. The acknowledging user is the token owner: the request body carries only the optional `note`. Copilot chat calls carry the same user token (the copilot checks it with clinical-api and calls it as that user); a 401 there also returns to sign-in.
+
 ## Run
 
 ```bash
 cd web/dashboard && npm ci
-npm run dev:mock        # whole UI on MSW mocks, no backend needed (http://localhost:5173)
+npm run dev:mock        # whole UI on MSW mocks (incl. the dev sign-in and 401/403 rules), no backend needed (http://localhost:5173)
 npm run dev             # against real services (proxy targets below)
 npm test                # Vitest, coverage gate on src/lib + src/hooks
 npm run lint && npm run typecheck

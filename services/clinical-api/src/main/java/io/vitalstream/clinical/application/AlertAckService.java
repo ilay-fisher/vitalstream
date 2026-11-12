@@ -11,7 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 
-/** Clinician acknowledgement with optimistic locking. */
+/** Clinician acknowledgement with optimistic locking and an audit line per success. */
 @Service
 public class AlertAckService {
 
@@ -40,20 +40,24 @@ public class AlertAckService {
   }
 
   /**
-   * Acknowledges an OPEN alert.
+   * Acknowledges an OPEN alert as {@code actor} and writes the INFO audit line {@code alert
+   * acknowledged} (the correlation id comes from the MDC).
    *
    * @throws AlertNotFoundException unknown id
    * @throws io.vitalstream.clinical.domain.InvalidStatusTransitionException already acknowledged
    * @throws ConcurrentAlertUpdateException another writer changed the alert in between
    */
-  public AlertView acknowledge(UUID id, String by, String note) {
-    AlertView view = unitOfWork.run(() -> applyAcknowledgement(id, by, note));
+  public AlertView acknowledge(UUID id, AckActor actor, String note) {
+    AlertView view = unitOfWork.run(() -> applyAcknowledgement(id, actor.displayName(), note));
     try {
       liveFeed.publish(view);
     } catch (RuntimeException e) {
       log.warn("Live feed publish failed for alert {}: {}", id, e.toString());
     }
-    log.info("Alert {} acknowledged by {}", id, by);
+    log.atInfo()
+        .addKeyValue("alertId", id)
+        .addKeyValue("actor", actor.sub())
+        .log("alert acknowledged");
     return view;
   }
 

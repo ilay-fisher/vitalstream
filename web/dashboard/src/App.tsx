@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react';
 import { AlertFeed } from './components/AlertFeed';
 import { CopilotPanel } from './components/CopilotPanel';
 import { PatientDetail } from './components/PatientDetail';
+import { SignIn } from './components/SignIn';
 import { WardOverview } from './components/WardOverview';
+import { useAuth, useSessionExpiry } from './hooks/useAuth';
+import { ROLE_LABEL } from './lib/auth';
 import { useTheme } from './hooks/useTheme';
 
 type Route = { name: 'ward' } | { name: 'alerts' } | { name: 'patient'; id: string };
@@ -19,12 +22,16 @@ export function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));
   const [copilot, setCopilot] = useState(false);
   const { theme, toggle } = useTheme();
+  const { session, signOut } = useAuth();
+  useSessionExpiry();
 
   useEffect(() => {
     const onHash = () => setRoute(parseRoute(window.location.hash));
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
+
+  if (!session) return <SignIn />;
 
   return (
     <div className={`shell${copilot ? ' with-copilot' : ''}`}>
@@ -57,6 +64,11 @@ export function App() {
           </a>
         </nav>
         <div className="top-actions">
+          <div className="current-user" data-testid="current-user">
+            <span className="user-name">{session.name}</span>
+            <span className="role-badge">{ROLE_LABEL[session.roles[0]]}</span>
+            <button onClick={signOut}>Sign out</button>
+          </div>
           <button
             onClick={toggle}
             aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}

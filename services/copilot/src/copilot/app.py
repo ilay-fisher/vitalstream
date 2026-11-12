@@ -38,7 +38,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     configure_logging(settings.service_name, settings.log_level)
     if settings.app_env == "dev":
         log.warning("running with dev secrets")
-    mcp = build_mcp(lambda: app.state.services.tools, settings.mcp_host_list)
+    mcp = build_mcp(lambda: app.state.services.mcp_tools, settings.mcp_host_list)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

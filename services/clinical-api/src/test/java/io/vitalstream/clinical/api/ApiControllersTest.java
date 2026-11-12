@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -12,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import io.vitalstream.clinical.application.AckActor;
 import io.vitalstream.clinical.application.AlertAckService;
 import io.vitalstream.clinical.application.AlertFilter;
 import io.vitalstream.clinical.application.AlertQueryService;
@@ -31,6 +33,7 @@ import io.vitalstream.clinical.domain.InvalidStatusTransitionException;
 import io.vitalstream.clinical.domain.PatientNotFoundException;
 import io.vitalstream.clinical.domain.Severity;
 import io.vitalstream.clinical.domain.TestAlerts;
+import io.vitalstream.clinical.infrastructure.security.SecurityConfig;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -41,15 +44,19 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.webmvc.test.autoconfigure.MockMvcBuilderCustomizer;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @WebMvcTest({AlertController.class, PatientController.class})
+@Import(SecurityConfig.class)
 class ApiControllersTest {
 
   private static final Instant NOW = Instant.parse("2026-11-11T20:00:00Z");
@@ -59,6 +66,18 @@ class ApiControllersTest {
     @Bean
     Clock clock() {
       return Clock.fixed(NOW, ZoneOffset.UTC);
+    }
+
+    /** Every request in this class is made by a signed-in clinician; auth rules live elsewhere. */
+    @Bean
+    MockMvcBuilderCustomizer signedInClinician() {
+      return builder ->
+          builder.defaultRequest(
+              get("/")
+                  .with(
+                      jwt()
+                          .jwt(j -> j.subject("dr.cohen").claim("name", "Dr. Cohen"))
+                          .authorities(new SimpleGrantedAuthority("ROLE_CLINICIAN"))));
     }
   }
 
@@ -137,23 +156,23 @@ class ApiControllersTest {
     UUID id = UUID.randomUUID();
     AlertView acked =
         AlertView.from(TestAlerts.alert(Severity.HIGH).acknowledge("dr.cohen", "ok", NOW));
-    when(acks.acknowledge(id, "dr.cohen", "ok")).thenReturn(acked);
+    when(acks.acknowledge(id, new AckActor("dr.cohen", "Dr. Cohen"), "ok")).thenReturn(acked);
 
     mvc.perform(
             post("/api/v1/alerts/" + id + "/ack")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"by\":\"dr.cohen\",\"note\":\"ok\"}"))
+                .content("{\"note\":\"ok\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.status").value("ACKNOWLEDGED"))
         .andExpect(jsonPath("$.acknowledgedBy").value("dr.cohen"));
   }
 
   @Test
-  void ackWithoutActorIsBadRequest() throws Exception {
+  void ackWithMalformedBodyIsBadRequest() throws Exception {
     mvc.perform(
             post("/api/v1/alerts/" + UUID.randomUUID() + "/ack")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"note\":\"x\"}"))
+                .content("{not json"))
         .andExpect(status().isBadRequest())
         .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
   }
@@ -171,7 +190,7 @@ class ApiControllersTest {
       mvc.perform(
               post("/api/v1/alerts/" + id + "/ack")
                   .contentType(MediaType.APPLICATION_JSON)
-                  .content("{\"by\":\"dr\"}"))
+                  .content("{\"note\":\"dr\"}"))
           .andExpect(status().isConflict())
           .andExpect(jsonPath("$.title").value("Conflict"));
     }

@@ -5,11 +5,13 @@ import pytest
 import respx
 
 from copilot.clinical import ClinicalApiClient
+from copilot.clinical_auth import StaticTokenProvider
 from copilot.rag.embedder import HashEmbedder
 from copilot.rag.retriever import Retriever
 from copilot.tools import CopilotTools
 from tests.fakes import InMemoryKeywordIndex, InMemoryStore
 
+SERVICE_TOKEN = "test-service-token"
 BASE = "http://clinical.test"
 POINT = {
     "observedAt": "2026-11-11T20:15:30Z",
@@ -29,7 +31,7 @@ VITALS_OBJECT = {
 
 @pytest.mark.asyncio
 async def test_vitals_unwraps_points_object() -> None:
-    client = ClinicalApiClient(BASE, timeout=2.0)
+    client = ClinicalApiClient(BASE, StaticTokenProvider(SERVICE_TOKEN), timeout=2.0)
     with respx.mock(assert_all_called=False) as router:
         router.get(f"{BASE}/api/v1/patients/P-0001/vitals").mock(
             return_value=httpx.Response(200, json=VITALS_OBJECT)
@@ -41,7 +43,7 @@ async def test_vitals_unwraps_points_object() -> None:
 
 @pytest.mark.asyncio
 async def test_latest_vitals_tool_reads_points_object() -> None:
-    clinical = ClinicalApiClient(BASE, timeout=2.0)
+    clinical = ClinicalApiClient(BASE, StaticTokenProvider(SERVICE_TOKEN), timeout=2.0)
     embedder = HashEmbedder()
     store, keyword = InMemoryStore(), InMemoryKeywordIndex()
     tools = CopilotTools(clinical, Retriever(embedder, store, keyword))

@@ -50,7 +50,10 @@ infra:
 secrets:
   # Name of a Secret you created beforehand. When empty the chart expects `<release>-secrets`.
   # Required keys: INGEST_API_KEY COPILOT_ADMIN_TOKEN MCP_TOKEN LOG_PSEUDONYM_KEY
-  #                POSTGRES_PASSWORD RABBITMQ_PASSWORD. Optional key: ANTHROPIC_API_KEY.
+  #                POSTGRES_PASSWORD RABBITMQ_PASSWORD CLINICAL_API_TOKEN.
+  # CLINICAL_JWT_SECRET is required unless auth.jwt.jwkSetUri is set (JWKS mode needs no HMAC key).
+  # Optional key: ANTHROPIC_API_KEY.
+  # CLINICAL_API_TOKEN: a JWT (role SERVICE, aud clinical-api) the copilot's /mcp tools send to clinical-api (chat uses the user's own token).
   existingSecret: ""
   # Render the Secret from `secrets.values` (pass them with --set, never commit them).
   # Ignored when existingSecret is set. Intended for CI and demos; prefer External Secrets in prod.
@@ -58,6 +61,17 @@ secrets:
   values: {}
   # Shortest accepted secret when the chart creates it and appEnv is not dev.
   minLength: 32
+
+# clinical-api token validation (CONTRACTS 4.2). The HMAC secret itself lives in the Secret
+# (CLINICAL_JWT_SECRET); only non-secret settings are values. The dev token endpoint is off in
+# prod (APP_ENV=prod) and is not routed by the ingress.
+auth:
+  jwt:
+    # Required `iss` claim. Empty keeps the service default (vitalstream-dev); set the issuer of
+    # your identity provider in real deployments.
+    issuer: ""
+    # Set to an OIDC provider's JWKS URL to verify RS256 tokens instead of the HS256 secret.
+    jwkSetUri: ""
 
 networkPolicy:
   enabled: true
@@ -203,8 +217,12 @@ services:
       AWS_REGION: "{{ .Values.infra.awsRegion }}"
       AWS_ENDPOINT_URL: "{{ .Values.infra.awsEndpointUrl }}"
       VITALSTREAM_SQS_QUEUENAME: "{{ .Values.infra.sqsQueueName }}"
+      CLINICAL_JWT_ISSUER: "{{ .Values.auth.jwt.issuer }}"
+      CLINICAL_JWT_JWK_SET_URI: "{{ .Values.auth.jwt.jwkSetUri }}"
     secretEnv: [LOG_PSEUDONYM_KEY, POSTGRES_PASSWORD, RABBITMQ_PASSWORD]
-    optionalSecretEnv: []
+    # Optional because JWKS mode needs no HMAC key; in HS256 mode the service refuses to start
+    # without a strong one (secret startup guard).
+    optionalSecretEnv: [CLINICAL_JWT_SECRET]
     # $(VAR) is expanded by Kubernetes from the secret variables declared before it.
     dependentEnv:
       RABBITMQ_URL: "amqp://{{ .Values.infra.rabbitmq.user }}:$(RABBITMQ_PASSWORD)@{{ .Values.infra.rabbitmq.host }}:{{ .Values.infra.rabbitmq.port }}"
@@ -244,7 +262,7 @@ services:
       CLINICAL_API_URL: 'http://{{ .Values.global.namePrefix }}clinical-api:{{ index .Values.services "clinical-api" "port" }}'
       LLM_PROVIDER: fake
       LLM_MODEL: claude-sonnet-5-5
-    secretEnv: [COPILOT_ADMIN_TOKEN, MCP_TOKEN, LOG_PSEUDONYM_KEY, POSTGRES_PASSWORD]
+    secretEnv: [COPILOT_ADMIN_TOKEN, MCP_TOKEN, LOG_PSEUDONYM_KEY, POSTGRES_PASSWORD, CLINICAL_API_TOKEN]
     optionalSecretEnv: [ANTHROPIC_API_KEY]
     dependentEnv:
       POSTGRES_URL: "postgresql://{{ .Values.infra.postgres.user }}:$(POSTGRES_PASSWORD)@{{ .Values.infra.postgres.host }}:{{ .Values.infra.postgres.port }}/{{ .Values.infra.postgres.database }}"

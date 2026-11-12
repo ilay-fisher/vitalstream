@@ -97,12 +97,11 @@ describe('AlertList acknowledge flow', () => {
     render(<AlertList alerts={alerts} />);
     const row = screen.getByTestId(`alert-${alerts[0].alertId}`);
     await userEvent.click(within(row).getByRole('button', { name: 'Acknowledge' }));
-    const by = within(row).getByLabelText('Acknowledged by');
-    await userEvent.clear(by);
-    await userEvent.type(by, 'dr.cohen');
+    expect(within(row).getByText('Acknowledging as Nurse Levi')).toBeInTheDocument();
+    await userEvent.type(within(row).getByLabelText('Note (optional)'), 'on my way');
     await userEvent.click(within(row).getByRole('button', { name: 'Confirm' }));
     await waitFor(() =>
-      expect(within(row).getByText('Acknowledged by dr.cohen')).toBeInTheDocument(),
+      expect(within(row).getByText('Acknowledged by Nurse Levi')).toBeInTheDocument(),
     );
     expect(mockState.alerts.find((a) => a.alertId === alerts[0].alertId)?.status).toBe(
       'ACKNOWLEDGED',
@@ -114,23 +113,9 @@ describe('AlertList acknowledge flow', () => {
     render(<AlertList alerts={alerts} />);
     const row = screen.getByTestId(`alert-${CONFLICT_ALERT_ID}`);
     await userEvent.click(within(row).getByRole('button', { name: 'Acknowledge' }));
-    const by = within(row).getByLabelText('Acknowledged by');
-    await userEvent.clear(by);
-    await userEvent.type(by, 'dr.cohen');
     await userEvent.click(within(row).getByRole('button', { name: 'Confirm' }));
     expect(await within(row).findByRole('alert')).toHaveTextContent(/changed by someone else/i);
     expect(within(row).getByText('Acknowledged by dr.levi')).toBeInTheDocument();
-  });
-
-  it('requires a name before confirming', async () => {
-    localStorage.clear();
-    const alerts = open();
-    render(<AlertList alerts={alerts} />);
-    const row = screen.getByTestId(`alert-${alerts[1].alertId}`);
-    await userEvent.click(within(row).getByRole('button', { name: 'Acknowledge' }));
-    await userEvent.click(within(row).getByRole('button', { name: 'Confirm' }));
-    expect(within(row).queryByText(/Acknowledged by (?!$)/)).toBeNull();
-    expect(within(row).getByLabelText('Acknowledged by')).toBeInvalid();
   });
 
   it('shows an empty state', () => {

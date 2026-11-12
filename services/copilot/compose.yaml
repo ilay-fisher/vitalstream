@@ -14,6 +14,8 @@ services:
       POSTGRES_URL: postgresql://${POSTGRES_USER:-vitalstream}:${POSTGRES_PASSWORD:-vitalstream}@postgres:5432/${POSTGRES_DB:-vitalstream}
       ELASTICSEARCH_URL: http://elasticsearch:9200
       CLINICAL_API_URL: http://clinical-api:8082
+      # Empty in dev: the copilot fetches a SERVICE token from clinical-api's dev endpoint.
+      CLINICAL_API_TOKEN: ${CLINICAL_API_TOKEN:-}
       LLM_PROVIDER: ${LLM_PROVIDER:-fake}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-claude-sonnet-5-5}

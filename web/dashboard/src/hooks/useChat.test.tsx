@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { createApi } from '../lib/api';
+import { authStore } from '../lib/auth';
 import { mockState } from '../mocks/handlers';
 import { server } from '../test/server';
 import { useChat } from './useChat';
@@ -51,6 +52,35 @@ describe('useChat', () => {
     expect(bodies[1]).toMatchObject({ message: 'second', patientId: 'P-0003' });
     expect(bodies[1].sessionId).toBe(result.current.state.sessionId);
     expect(correlation.every(Boolean)).toBe(true);
+  });
+
+  it('sends the signed-in user token on every chat call, never in the URL', async () => {
+    mockState.tokenDelayMs = 0;
+    const seen: Array<{ auth: string | null; url: string }> = [];
+    server.use(
+      http.post('*/copilot-api/api/v1/chat', ({ request }) => {
+        seen.push({ auth: request.headers.get('authorization'), url: request.url });
+        return undefined;
+      }),
+    );
+    const { result } = renderHook(() => useChat(api));
+    await act(async () => {
+      await result.current.send('hi');
+    });
+    await waitFor(() => expect(result.current.state.status).toBe('idle'));
+    expect(seen[0].auth).toBe(`Bearer ${authStore.getToken()}`);
+    expect(seen[0].url).not.toContain(authStore.getToken() ?? 'x');
+  });
+
+  it('a 401 from the copilot sends the user back to sign-in without an error bubble', async () => {
+    server.use(http.post('*/copilot-api/api/v1/chat', () => new Response('{}', { status: 401 })));
+    const { result } = renderHook(() => useChat(api));
+    await act(async () => {
+      await result.current.send('hi');
+    });
+    expect(authStore.getSnapshot().session).toBeNull();
+    expect(authStore.getSnapshot().notice).toMatch(/expired/i);
+    expect(result.current.state.messages[1]?.error).toBeUndefined();
   });
 
   it('ignores blank messages', async () => {

@@ -22,6 +22,9 @@ services:
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,clinical-api}
       APP_ENV: ${APP_ENV:-dev}
       LOG_PSEUDONYM_KEY: ${LOG_PSEUDONYM_KEY:-dev-only-pseudonym-key}
+      CLINICAL_JWT_SECRET: ${CLINICAL_JWT_SECRET:-dev-clinical-jwt-secret-0123456789abcdef}
+      CLINICAL_JWT_ISSUER: ${CLINICAL_JWT_ISSUER:-vitalstream-dev}
+      CLINICAL_JWT_JWK_SET_URI: ${CLINICAL_JWT_JWK_SET_URI:-}
     depends_on:
       kafka:
         condition: service_healthy

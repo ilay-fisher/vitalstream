@@ -1,3 +1,4 @@
+import { authStore } from './auth';
 import type {
   AckRequest,
   AlertQuery,
@@ -38,6 +39,11 @@ export class ApiError extends Error {
   get isConflict(): boolean {
     return this.status === 409;
   }
+
+  /** Signed in, but the role does not allow the operation. */
+  get isForbidden(): boolean {
+    return this.status === 403;
+  }
 }
 
 export interface ApiOptions {
@@ -46,6 +52,10 @@ export interface ApiOptions {
   /** Proxied prefix for the copilot. */
   copilotBase?: string;
   fetchImpl?: typeof fetch;
+  /** Bearer token of the signed-in user (default: the app-wide session). */
+  getToken?: () => string | null;
+  /** Called when clinical-api answers 401: the session is over (default: back to sign-in). */
+  onUnauthorized?: () => void;
 }
 
 type Json = Record<string, unknown>;
@@ -135,6 +145,14 @@ export function createApi(options: ApiOptions = {}) {
   const clinical = options.clinicalBase ?? '/clinical-api';
   const copilot = options.copilotBase ?? '/copilot-api';
   const doFetch = (input: string, init?: RequestInit) => (options.fetchImpl ?? fetch)(input, init);
+  const getToken = options.getToken ?? (() => authStore.getToken());
+  const onUnauthorized = options.onUnauthorized ?? (() => authStore.expire());
+
+  /** Authorization header for clinical-api; fetch-based SSE reuses it, so no token is put in a URL. */
+  function authHeaders(): Record<string, string> {
+    const token = getToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
 
   async function request(url: string, init: RequestInit = {}): Promise<unknown> {
     const correlationId = newCorrelationId();
@@ -143,11 +161,13 @@ export function createApi(options: ApiOptions = {}) {
       headers: {
         Accept: 'application/json',
         ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        ...authHeaders(),
         ...(init.headers as Record<string, string> | undefined),
         'X-Correlation-Id': correlationId,
       },
     });
     if (!response.ok) {
+      if (response.status === 401) onUnauthorized();
       let problem: Problem = { status: response.status };
       try {
         problem = { ...problem, ...asRecord(await response.json()) };
@@ -171,6 +191,8 @@ export function createApi(options: ApiOptions = {}) {
   return {
     clinicalBase: clinical,
     copilotBase: copilot,
+    authHeaders,
+    handleUnauthorized: onUnauthorized,
 
     async listPatients(): Promise<PatientSummary[]> {
       return unwrapList(await request(`${clinical}/api/v1/patients`)).map(normalizePatient);

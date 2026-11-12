@@ -85,6 +85,10 @@
           "headerParameters": {
             "parameters": [
               {
+                "name": "Authorization",
+                "value": "=Bearer {{ $env.CLINICAL_API_TOKEN || $('Fetch dev token').item.json.token }}"
+              },
+              {
                 "name": "X-Correlation-Id",
                 "value": "=n8n-escalation-{{ $('Critical alert queue').item.json.alertId }}"
               }
@@ -104,7 +108,7 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [
-          780,
+          1300,
           200
         ],
         "retryOnFail": true,
@@ -139,7 +143,7 @@
         "type": "n8n-nodes-base.if",
         "typeVersion": 2,
         "position": [
-          1040,
+          1560,
           200
         ]
       },
@@ -159,7 +163,7 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [
-          1300,
+          1820,
           100
         ],
         "onError": "continueRegularOutput"
@@ -189,7 +193,7 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          1560,
+          2080,
           100
         ]
       },
@@ -218,14 +222,14 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          1300,
+          1820,
           320
         ]
       },
       {
         "parameters": {
-          "content": "## critical-alert-escalation\nclinical-api publishes every CRITICAL alert to RabbitMQ exchange `alerts.notify` (routing key `alert.critical`), bound to queue `notify.critical`.\nAfter `ESCALATION_WAIT_MINUTES` (default 5) the alert is re-read; if it is still OPEN it is POSTed to `ESCALATION_WEBHOOK_URL` (placeholder, no real endpoint ships).\nOnly RabbitMQ, IF, Wait, HTTP and Set nodes: executeCommand, ssh and code are disabled by NODES_EXCLUDE.",
-          "height": 190,
+          "content": "## critical-alert-escalation\nclinical-api publishes every CRITICAL alert to RabbitMQ exchange `alerts.notify` (routing key `alert.critical`), bound to queue `notify.critical`.\nAfter `ESCALATION_WAIT_MINUTES` (default 5) the alert is re-read; if it is still OPEN it is POSTed to `ESCALATION_WEBHOOK_URL` (placeholder, no real endpoint ships).\nOnly RabbitMQ, IF, Wait, HTTP and Set nodes: executeCommand, ssh and code are disabled by NODES_EXCLUDE.\nclinical-api needs a Bearer token: `CLINICAL_API_TOKEN` (env) when set, otherwise, in dev only, a SERVICE token for sub `n8n` from `/api/v1/dev/token`. The token is read only inside that request's bearer header expression (no node copies it into item data), and the workflow saves no execution data, so neither tokens nor alert contents are stored by n8n.",
+          "height": 240,
           "width": 620
         },
         "id": "a1f0c001-0000-4000-8000-000000000009",
@@ -236,6 +240,66 @@
           -20,
           -200
         ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "conditions": [
+              {
+                "id": "token-configured",
+                "leftValue": "={{ $env.CLINICAL_API_TOKEN || '' }}",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEmpty",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "a1f0c001-0000-4000-8000-00000000000a",
+        "name": "Configured token set?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          780,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $env.CLINICAL_API_URL || 'http://clinical-api:8082' }}/api/v1/dev/token",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ sub: 'n8n', name: 'n8n escalation', roles: ['SERVICE'] }) }}",
+          "options": {
+            "timeout": 10000,
+            "response": {
+              "response": {
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "id": "a1f0c001-0000-4000-8000-00000000000c",
+        "name": "Fetch dev token",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1040,
+          300
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       }
     ],
     "connections": {
@@ -266,7 +330,7 @@
         "main": [
           [
             {
-              "node": "Get alert from clinical-api",
+              "node": "Configured token set?",
               "type": "main",
               "index": 0
             }
@@ -312,10 +376,42 @@
             }
           ]
         ]
+      },
+      "Configured token set?": {
+        "main": [
+          [
+            {
+              "node": "Get alert from clinical-api",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Fetch dev token",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Fetch dev token": {
+        "main": [
+          [
+            {
+              "node": "Get alert from clinical-api",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
       }
     },
     "settings": {
-      "executionOrder": "v1"
+      "executionOrder": "v1",
+      "saveDataSuccessExecution": "none",
+      "saveDataErrorExecution": "none",
+      "saveManualExecutions": false
     },
     "pinData": {},
     "tags": []

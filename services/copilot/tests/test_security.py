@@ -15,7 +15,7 @@ from copilot.llm.fake import FakeLLM
 from copilot.llm.types import Message
 from copilot.pseudonym import patient_ref
 from copilot.tools import ToolSpec
-from tests.conftest import CLINICAL, DETERIORATING
+from tests.conftest import CLINICAL, DETERIORATING, USER_HEADERS
 from tests.test_api import make_services
 
 POISON = (
@@ -42,7 +42,9 @@ def test_defaults_match_contract() -> None:
 async def _client(stack: dict[str, Any]) -> httpx.AsyncClient:
     app = create_app(Settings(), make_services(stack))
     return httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://localhost:8083"
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://localhost:8083",
+        headers=USER_HEADERS,
     )
 
 

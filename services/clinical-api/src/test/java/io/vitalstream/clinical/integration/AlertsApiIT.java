@@ -6,6 +6,7 @@ import static org.awaitility.Awaitility.await;
 import io.vitalstream.clinical.domain.Alert;
 import io.vitalstream.clinical.domain.AlertType;
 import io.vitalstream.clinical.domain.Severity;
+import io.vitalstream.clinical.infrastructure.security.TestTokens;
 import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -37,14 +38,16 @@ class AlertsApiIT extends IntegrationTestBase {
     awaitAlertStored(id);
 
     HttpResponse<String> ok =
-        postJson("/api/v1/alerts/" + id + "/ack", "{\"by\":\"dr.cohen\",\"note\":\"bedside now\"}");
-    HttpResponse<String> again =
-        postJson("/api/v1/alerts/" + id + "/ack", "{\"by\":\"nurse.levi\"}");
+        postJson(
+            "/api/v1/alerts/" + id + "/ack",
+            "{\"by\":\"mallory\",\"note\":\"bedside now\"}",
+            TestTokens.valid("dr.cohen", "Dr. Cohen", "CLINICIAN"));
+    HttpResponse<String> again = postJson("/api/v1/alerts/" + id + "/ack", "{}");
 
     assertThat(ok.statusCode()).isEqualTo(200);
     JsonNode body = json.readTree(ok.body());
     assertThat(body.path("status").asString()).isEqualTo("ACKNOWLEDGED");
-    assertThat(body.path("acknowledgedBy").asString()).isEqualTo("dr.cohen");
+    assertThat(body.path("acknowledgedBy").asString()).isEqualTo("Dr. Cohen");
     assertThat(body.path("version").asLong()).isEqualTo(1L);
     assertThat(again.statusCode()).isEqualTo(409);
     assertThat(again.headers().firstValue("Content-Type").orElse(""))

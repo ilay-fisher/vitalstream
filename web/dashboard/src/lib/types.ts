@@ -155,8 +155,8 @@ export interface AlertQuery {
   size?: number;
 }
 
+/** The acknowledging user is the token's owner; the body carries only the optional note. */
 export interface AckRequest {
-  by: string;
   note?: string;
 }
 

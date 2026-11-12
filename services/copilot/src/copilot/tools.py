@@ -110,6 +110,11 @@ class CopilotTools:
             "compute_news2": self.compute_news2,
         }
 
+    @property
+    def clinical(self) -> ClinicalApiClient:
+        """The clinical-api client these tools use (its credential decides whose access applies)."""
+        return self._clinical
+
     async def get_patient_vitals(self, patient_id: str, minutes: int = 60) -> dict[str, Any]:
         """Latest and aggregate vitals for a patient over the last ``minutes`` minutes."""
         self._check_patient_id(patient_id)

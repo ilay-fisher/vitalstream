@@ -6,6 +6,7 @@ import respx
 from prometheus_client import REGISTRY
 
 from copilot.clinical import ClinicalApiClient
+from copilot.clinical_auth import StaticTokenProvider
 from copilot.correlation import set_correlation_id
 from copilot.rag.embedder import HashEmbedder
 from copilot.rag.ingest import IngestService
@@ -13,6 +14,7 @@ from copilot.rag.retriever import Retriever
 from copilot.tools import CopilotTools, ToolError
 from tests.fakes import InMemoryKeywordIndex, InMemoryStore
 
+SERVICE_TOKEN = "test-service-token"
 BASE = "http://clinical.test"
 
 VITALS = [
@@ -46,7 +48,7 @@ async def _tools() -> CopilotTools:
         content="# NEWS2 escalation\n\n## Scores\n\nA NEWS2 score of 7 needs emergency response.",
         source="unit",
     )
-    clinical = ClinicalApiClient(BASE, timeout=2.0)
+    clinical = ClinicalApiClient(BASE, StaticTokenProvider(SERVICE_TOKEN), timeout=2.0)
     return CopilotTools(clinical, Retriever(embedder, store, keyword))
 
 

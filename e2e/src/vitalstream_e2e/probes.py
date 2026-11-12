@@ -25,14 +25,23 @@ def batch_body(
     }
 
 
-def ack_body(actor: str) -> dict[str, str]:
-    """Body of ``POST /api/v1/alerts/{id}/ack``."""
-    return {"by": actor, "note": "acknowledged by the e2e suite"}
+def ack_body(by: str | None = None) -> dict[str, str]:
+    """Body of ``POST /api/v1/alerts/{id}/ack``: only a note, the actor is the bearer token.
+
+    ``by`` exists to prove the server ignores a client-supplied actor.
+    """
+    body = {"note": "acknowledged by the e2e suite"}
+    return {"by": by, **body} if by else body
+
+
+def open_alerts(page: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every OPEN alert in a ``GET /alerts`` page, in page order."""
+    return [a for a in page.get("items", []) if a.get("status") == "OPEN"]
 
 
 def find_open_alert(page: dict[str, Any]) -> dict[str, Any] | None:
     """First OPEN alert in a ``GET /alerts`` page, or None."""
-    return next((a for a in page.get("items", []) if a.get("status") == "OPEN"), None)
+    return next(iter(open_alerts(page)), None)
 
 
 def tool_calls(events: list[tuple[str, dict[str, Any]]]) -> list[str]:

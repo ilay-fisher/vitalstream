@@ -57,6 +57,30 @@ if ! k -n "$INFRA_NS" get secret infra-credentials >/dev/null 2>&1; then
     --from-literal=RABBITMQ_PASSWORD="$RMQ"
 fi
 
+# clinical-api auth (CONTRACTS 4.2): a random HMAC secret, and the copilot's SERVICE token signed with
+# it. Created once and reused; also added to a vitalstream-secrets that predates this. Neither value is
+# printed or passed as an argument: the secret reaches the minting script through its environment and
+# the Secret manifest goes to kubectl on stdin.
+if ! k -n "$APP_NS" get secret vitalstream-secrets -o jsonpath='{.data.CLINICAL_JWT_SECRET}' 2>/dev/null | grep -q .; then
+  log "clinical-api JWT secret and copilot service token"
+  ISSUER="${CLINICAL_JWT_ISSUER:-$(sed -n 's/^ *issuer: *"\{0,1\}\([^"#]*[^" #]\)"\{0,1\} *$/\1/p' "$CHART/values-kind.yaml" | head -n 1)}"
+  JWT_ISSUER="${ISSUER:-vitalstream-dev}"
+  JWT_SECRET="$(openssl rand -hex 32)" # 64 hex chars = 32 random bytes
+  export JWT_ISSUER JWT_SECRET
+  SERVICE_JWT="$(python3 "$HERE/mint-service-token.py")"
+  k -n "$APP_NS" apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vitalstream-secrets
+type: Opaque
+stringData:
+  CLINICAL_JWT_SECRET: "$JWT_SECRET"
+  CLINICAL_API_TOKEN: "$SERVICE_JWT"
+EOF
+  unset JWT_SECRET SERVICE_JWT
+fi
+
 log "infrastructure"
 k -n "$INFRA_NS" create configmap postgres-init --from-file=init.sql="$ROOT/infra/postgres/init.sql" \
   --dry-run=client -o yaml | k apply -f -

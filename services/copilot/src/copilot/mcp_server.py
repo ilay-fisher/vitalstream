@@ -16,6 +16,7 @@ def build_mcp(get_tools: Callable[[], CopilotTools], allowed_hosts: list[str]) -
     lifespan has connected to Postgres/Elasticsearch.  Stateless HTTP + JSON responses keep it
     trivially scalable and curl-friendly.  DNS-rebinding protection restricts the Host header
     to ``allowed_hosts``; the bearer token is enforced by `copilot.security.BearerGuard`.
+    ``get_tools`` must return the tools backed by the SERVICE identity, never the chat tools.
     """
     server = FastMCP(
         "vitalstream-copilot",

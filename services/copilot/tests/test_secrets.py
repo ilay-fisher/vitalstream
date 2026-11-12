@@ -20,6 +20,7 @@ def prod(**overrides: object) -> Settings:
         "mcp_token": SecretStr(STRONG + "1"),
         "log_pseudonym_key": SecretStr(STRONG + "2"),
         "postgres_url": PG,
+        "clinical_api_token": SecretStr("jwt." + "c" * 40),
     }
     return Settings(**{**base, **overrides})  # type: ignore[arg-type]
 

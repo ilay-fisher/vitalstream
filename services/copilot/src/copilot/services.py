@@ -3,6 +3,7 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
+import httpx
 import structlog
 from elasticsearch import AsyncElasticsearch
 from sqlalchemy import text
@@ -10,6 +11,7 @@ from sqlalchemy import text
 from copilot.agent.graph import CopilotAgent
 from copilot.agent.memory import ConversationMemory
 from copilot.clinical import ClinicalApiClient
+from copilot.clinical_auth import UserTokenProvider, build_token_provider
 from copilot.config import Settings
 from copilot.db import create_engine, run_migrations, session_factory
 from copilot.llm.factory import build_llm
@@ -28,6 +30,7 @@ class Services:
     """Everything the HTTP layer and the MCP server need at runtime."""
 
     tools: CopilotTools
+    mcp_tools: CopilotTools
     agent: CopilotAgent
     memory: ConversationMemory
     ingest: IngestService
@@ -48,7 +51,20 @@ async def build_services(settings: Settings) -> Services:
     await run_migrations(settings.sqlalchemy_url)
     engine = create_engine(settings.sqlalchemy_url)
     es_client = AsyncElasticsearch(settings.elasticsearch_url)
-    clinical = ClinicalApiClient(settings.clinical_api_url, settings.http_timeout_seconds)
+    # Two clients that can never share a credential: chat tools act as the end user, the MCP
+    # tools (no end user) act as the SERVICE identity.
+    user_clinical = ClinicalApiClient(
+        settings.clinical_api_url, UserTokenProvider(), settings.http_timeout_seconds
+    )
+    service_http = httpx.AsyncClient(
+        base_url=settings.clinical_api_url.rstrip("/"), timeout=settings.http_timeout_seconds
+    )
+    service_clinical = ClinicalApiClient(
+        settings.clinical_api_url,
+        build_token_provider(settings, service_http),
+        settings.http_timeout_seconds,
+        http_client=service_http,
+    )
 
     store = PgStore(session_factory(engine))
     keyword = EsKeywordIndex(es_client, settings.es_index)
@@ -63,7 +79,8 @@ async def build_services(settings: Settings) -> Services:
     retriever = Retriever(
         embedder, store, keyword, rrf_k=settings.rrf_k, candidates=settings.retrieval_candidates
     )
-    tools = CopilotTools(clinical, retriever)
+    tools = CopilotTools(user_clinical, retriever)
+    mcp_tools = CopilotTools(service_clinical, retriever)
     llm = build_llm(settings)
 
     await keyword.ensure_index()
@@ -82,6 +99,7 @@ async def build_services(settings: Settings) -> Services:
     log.info("services_ready", llmProvider=llm.name, embedder=settings.embedder)
     return Services(
         tools=tools,
+        mcp_tools=mcp_tools,
         agent=CopilotAgent(llm, tools, max_steps=settings.max_agent_steps),
         memory=ConversationMemory(
             ttl_seconds=settings.session_ttl_seconds,
@@ -93,5 +111,10 @@ async def build_services(settings: Settings) -> Services:
         llm_provider=llm.name,
         health_checks={"postgres": postgres_ok, "elasticsearch": elasticsearch_ok},
         critical_checks=frozenset({"postgres"}),
-        closers=[engine.dispose, es_client.close, clinical.aclose],
+        closers=[
+            engine.dispose,
+            es_client.close,
+            user_clinical.aclose,
+            service_clinical.aclose,
+        ],
     )

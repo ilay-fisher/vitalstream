@@ -221,7 +221,89 @@ label {
 .top-actions {
   margin-left: auto;
   display: flex;
+  align-items: center;
   gap: 8px;
+}
+.current-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 8px;
+  padding-right: 12px;
+  border-right: 1px solid var(--line);
+}
+.user-name {
+  font-weight: 600;
+}
+.role-badge {
+  font-size: 12px;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.signin {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.signin-card {
+  width: min(440px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 28px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.signin-brand {
+  color: var(--accent);
+}
+.signin-users {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.signin-users button {
+  width: 100%;
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'who role'
+    'sub role';
+  align-items: center;
+  column-gap: 12px;
+  text-align: left;
+}
+.signin-users .who {
+  grid-area: who;
+  font-weight: 600;
+}
+.signin-users .sub {
+  grid-area: sub;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+.signin-users .role-badge {
+  grid-area: role;
+}
+.small {
+  font-size: 12px;
+}
+.acting-as {
+  font-size: 12px;
+  color: var(--muted);
+}
+.hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
 }
 main {
   padding: 20px;

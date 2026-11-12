@@ -1,7 +1,7 @@
-"""HTTP client for clinical-api (CONTRACTS §4), forwarding the correlation id."""
+"""HTTP client for clinical-api (CONTRACTS §4, §4.2): bearer auth, correlation id forwarded."""
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 import structlog
@@ -15,9 +15,22 @@ _LIST_KEYS = ("content", "items", "points", "vitals", "readings", "data", "alert
 class ClinicalApiError(Exception):
     """clinical-api could not satisfy a request."""
 
-    def __init__(self, message: str, *, not_found: bool = False) -> None:
+    def __init__(self, message: str, *, not_found: bool = False, status: int | None = None) -> None:
         super().__init__(message)
         self.not_found = not_found
+        self.status = status
+
+
+class TokenProvider(Protocol):
+    """Source of the bearer token the clinical-api client sends (see ``clinical_auth``)."""
+
+    async def token(self) -> str:
+        """A token that is valid now."""
+        ...
+
+    def invalidate(self) -> None:
+        """Forget the cached token (clinical-api rejected it); the next call gets a new one."""
+        ...
 
 
 def _as_list(payload: Any) -> list[dict[str, Any]]:
@@ -35,12 +48,45 @@ def _as_list(payload: Any) -> list[dict[str, Any]]:
 class ClinicalApiClient:
     """Thin async wrapper over the two clinical-api endpoints the copilot needs."""
 
-    def __init__(self, base_url: str, timeout: float = 10.0) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=timeout)
+    def __init__(
+        self,
+        base_url: str,
+        token_provider: TokenProvider,
+        timeout: float = 10.0,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._client = http_client or httpx.AsyncClient(
+            base_url=base_url.rstrip("/"), timeout=timeout
+        )
+        self._tokens = token_provider
 
     async def aclose(self) -> None:
         """Release the connection pool."""
         await self._client.aclose()
+
+    async def me(self, token: str) -> dict[str, Any]:
+        """Identity behind ``token`` (``GET /api/v1/me``), used to vet a user before any work.
+
+        Raises :class:`ClinicalApiError` carrying clinical-api's status (401/403) when it rejects
+        the token, or ``status=None`` when clinical-api cannot be reached.
+        """
+        headers = {"Authorization": f"Bearer {token}"}
+        if correlation_id := get_correlation_id():
+            headers[CORRELATION_HEADER] = correlation_id
+        try:
+            response = await self._client.get("/api/v1/me", headers=headers)
+        except httpx.HTTPError as exc:
+            log.warning("clinical_api_unreachable", endpoint="me", error=type(exc).__name__)
+            raise ClinicalApiError("clinical-api unavailable") from exc
+        if response.status_code >= 400:
+            raise ClinicalApiError(
+                f"clinical-api rejected the token (HTTP {response.status_code})",
+                status=response.status_code,
+            )
+        body = response.json()
+        if not isinstance(body, dict) or not isinstance(body.get("sub"), str):
+            raise ClinicalApiError("clinical-api returned an unusable identity")
+        return body
 
     async def vitals(self, patient_id: str, minutes: int) -> list[dict[str, Any]]:
         """Raw vitals of the last ``minutes`` minutes for a patient."""
@@ -66,17 +112,27 @@ class ClinicalApiClient:
         return _as_list(await self._get("/api/v1/alerts", "alerts", params))
 
     async def _get(self, path: str, endpoint: str, params: dict[str, Any]) -> Any:
-        headers = {}
+        response = await self._send(path, endpoint, params)
+        if response.status_code == 401:
+            # The token may simply have been rotated or expired: renew once, then give up.
+            self._tokens.invalidate()
+            response = await self._send(path, endpoint, params)
+        if response.status_code == 404:
+            raise ClinicalApiError("resource not found in clinical-api", not_found=True, status=404)
+        if response.status_code >= 400:
+            log.warning("clinical_api_error", endpoint=endpoint, status=response.status_code)
+            raise ClinicalApiError(
+                f"clinical-api unavailable (HTTP {response.status_code})",
+                status=response.status_code,
+            )
+        return response.json()
+
+    async def _send(self, path: str, endpoint: str, params: dict[str, Any]) -> httpx.Response:
+        headers = {"Authorization": f"Bearer {await self._tokens.token()}"}
         if correlation_id := get_correlation_id():
             headers[CORRELATION_HEADER] = correlation_id
         try:
-            response = await self._client.get(path, params=params, headers=headers)
+            return await self._client.get(path, params=params, headers=headers)
         except httpx.HTTPError as exc:
             log.warning("clinical_api_unreachable", endpoint=endpoint, error=type(exc).__name__)
             raise ClinicalApiError("clinical-api unavailable") from exc
-        if response.status_code == 404:
-            raise ClinicalApiError("resource not found in clinical-api", not_found=True)
-        if response.status_code >= 400:
-            log.warning("clinical_api_error", endpoint=endpoint, status=response.status_code)
-            raise ClinicalApiError(f"clinical-api unavailable (HTTP {response.status_code})")
-        return response.json()

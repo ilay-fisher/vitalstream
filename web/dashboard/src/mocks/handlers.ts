@@ -1,4 +1,6 @@
 import { delay, http, HttpResponse } from 'msw';
+import type { RoleName } from '../lib/auth';
+import { issueMockToken, readMockToken, type MockClaims } from './auth';
 import type { AlertView, Metric } from '../lib/types';
 import { buildAlerts, buildPatients, buildVitals, CONFLICT_ALERT_ID, withOpenCounts } from './data';
 
@@ -32,6 +34,20 @@ export function resetMockState(overrides: Partial<MockState> = {}): void {
     nextAlert: 100,
     ...overrides,
   });
+}
+
+const READ_ROLES: RoleName[] = ['CLINICIAN', 'VIEWER', 'SERVICE'];
+
+/** Mirrors clinical-api CONTRACTS 4.2: 401 without a token, 403 for a role that may not do this. */
+function authorize(request: Request, allowed: RoleName[] = READ_ROLES): MockClaims | Response {
+  const claims = readMockToken(request.headers.get('authorization'));
+  const problem = (status: number, title: string) =>
+    HttpResponse.json(
+      { title, status, detail: title },
+      { status, headers: { 'Content-Type': 'application/problem+json' } },
+    );
+  if (!claims) return problem(401, 'Unauthorized');
+  return claims.roles.some((r) => allowed.includes(r)) ? claims : problem(403, 'Forbidden');
 }
 
 const encoder = new TextEncoder();
@@ -124,7 +140,27 @@ const COPILOT_ANSWER =
   'This is decision support only; confirm against local protocol.';
 
 export const handlers = [
-  http.get('*/clinical-api/api/v1/patients', async () => {
+  http.post('*/clinical-api/api/v1/dev/token', async ({ request }) => {
+    const body = (await request.json()) as MockClaims;
+    return HttpResponse.json({
+      token: issueMockToken(body),
+      expiresAt: new Date(Date.now() + 8 * 3_600_000).toISOString(),
+    });
+  }),
+
+  http.get('*/clinical-api/api/v1/me', ({ request }) => {
+    const claims = authorize(request);
+    if (claims instanceof Response) return claims;
+    return HttpResponse.json({
+      sub: claims.sub,
+      name: claims.name ?? claims.sub,
+      roles: claims.roles,
+    });
+  }),
+
+  http.get('*/clinical-api/api/v1/patients', async ({ request }) => {
+    const denied = authorize(request);
+    if (denied instanceof Response) return denied;
     await delay(120);
     return HttpResponse.json(
       withOpenCounts(buildPatients(), mockState.alerts).map(({ latest, openAlertCount, ...p }) => ({
@@ -136,6 +172,8 @@ export const handlers = [
   }),
 
   http.get('*/clinical-api/api/v1/patients/:id/vitals', async ({ params, request }) => {
+    const denied = authorize(request);
+    if (denied instanceof Response) return denied;
     const url = new URL(request.url);
     const metric = (url.searchParams.get('metric') ?? 'HEART_RATE') as Metric;
     const to = Date.parse(url.searchParams.get('to') ?? '') || Date.now();
@@ -169,7 +207,9 @@ export const handlers = [
     });
   }),
 
-  http.get('*/clinical-api/api/v1/patients/:id', ({ params }) => {
+  http.get('*/clinical-api/api/v1/patients/:id', ({ params, request }) => {
+    const denied = authorize(request);
+    if (denied instanceof Response) return denied;
     const patient = withOpenCounts(buildPatients(), mockState.alerts).find(
       (p) => p.id === params.id,
     );
@@ -185,18 +225,22 @@ export const handlers = [
       : HttpResponse.json({ title: 'Not found', status: 404 }, { status: 404 });
   }),
 
-  http.get('*/clinical-api/api/v1/alerts/stream', () =>
-    sseResponse((push, close) => {
+  http.get('*/clinical-api/api/v1/alerts/stream', ({ request }) => {
+    const denied = authorize(request);
+    if (denied instanceof Response) return denied;
+    return sseResponse((push, close) => {
       const timer = setInterval(() => push('alert', liveAlert()), mockState.streamIntervalMs);
       // Stop producing once the client goes away (cancel flips `closed`; the next push is a no-op).
       setTimeout(() => {
         clearInterval(timer);
         close();
       }, 10 * 60_000);
-    }),
-  ),
+    });
+  }),
 
-  http.get('*/clinical-api/api/v1/alerts/:id', ({ params }) => {
+  http.get('*/clinical-api/api/v1/alerts/:id', ({ params, request }) => {
+    const denied = authorize(request);
+    if (denied instanceof Response) return denied;
     const alert = mockState.alerts.find((a) => a.alertId === params.id);
     return alert
       ? HttpResponse.json(alert)
@@ -204,6 +248,8 @@ export const handlers = [
   }),
 
   http.get('*/clinical-api/api/v1/alerts', async ({ request }) => {
+    const denied = authorize(request);
+    if (denied instanceof Response) return denied;
     const url = new URL(request.url);
     const q = (url.searchParams.get('q') ?? '').toLowerCase();
     const filter = (key: keyof AlertView) => url.searchParams.get(key) ?? undefined;
@@ -226,7 +272,10 @@ export const handlers = [
   }),
 
   http.post('*/clinical-api/api/v1/alerts/:id/ack', async ({ params, request }) => {
-    const body = (await request.json()) as { by: string; note?: string };
+    const actor = authorize(request, ['CLINICIAN']);
+    if (actor instanceof Response) return actor;
+    // The real API ignores any `by` in the body: the actor is the token.
+    const body = (await request.json()) as { note?: string };
     const alert = mockState.alerts.find((a) => a.alertId === params.id);
     if (!alert) return HttpResponse.json({ title: 'Not found', status: 404 }, { status: 404 });
     await delay(150);
@@ -246,7 +295,7 @@ export const handlers = [
     }
     Object.assign(alert, {
       status: 'ACKNOWLEDGED',
-      acknowledgedBy: body.by,
+      acknowledgedBy: actor.name ?? actor.sub,
       acknowledgementNote: body.note ?? null,
       acknowledgedAt: new Date().toISOString(),
       version: (alert.version ?? 0) + 1,
@@ -255,6 +304,8 @@ export const handlers = [
   }),
 
   http.post('*/copilot-api/api/v1/chat', async ({ request }) => {
+    const denied = authorize(request);
+    if (denied instanceof Response) return denied;
     const body = (await request.json()) as { message: string; sessionId?: string };
     const sessionId = body.sessionId ?? 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
     return sseResponse((push, close) => {

@@ -23,7 +23,7 @@ deploy/kind/smoke.sh     # port-forwards 26081/26083 and curls the health endpoi
 deploy/kind/down.sh      # kind delete cluster
 ```
 
-`up.sh` builds the images that have a Dockerfile on main (ingest-gateway, copilot), generates random 48-character secrets (so the `APP_ENV=prod` guard passes), and installs the chart with `values-kind.yaml`. `stream-processor`, `clinical-api` and `dashboard` are `enabled: false` there until their images exist (clinical-api and stream-processor also need Cassandra/RabbitMQ/LocalStack, which the kind infra does not include). Set `BUILD=0` to reuse local images.
+`up.sh` builds the images that have a Dockerfile on main (ingest-gateway, copilot), generates random 48-character secrets (so the `APP_ENV=prod` guard passes), and installs the chart with `values-kind.yaml`. `stream-processor`, `clinical-api` and `dashboard` are `enabled: false` there until their images exist (clinical-api and stream-processor also need Cassandra/RabbitMQ/LocalStack, which the kind infra does not include). Set `BUILD=0` to reuse local images. It also creates `CLINICAL_JWT_SECRET` (random, 32 bytes) and `CLINICAL_API_TOKEN` in `vitalstream-secrets`: the token is an HS256 JWT signed with that secret (`deploy/kind/mint-service-token.py`: `iss` `vitalstream-dev` unless `auth.jwt.issuer` is set in `values-kind.yaml` or `CLINICAL_JWT_ISSUER` is exported, `aud` `clinical-api`, `sub` `copilot-mcp`, `roles` `[SERVICE]`, 30 days). Neither value is printed; an existing cluster whose secret lacks them gets them added on the next run. The token is not renewed: rerun after deleting the two keys (or the secret) to mint a fresh one.
 
 Dev infra uses the official images pinned in `infra/compose.yaml` as plain manifests (`kind/infra.yaml`), not Bitnami charts, because the free Bitnami images left Docker Hub in 2025. It has no persistence and no TLS.
 
@@ -37,8 +37,9 @@ Dev infra uses the official images pinned in `infra/compose.yaml` as plain manif
 | `global.probeHost` | `localhost` | Host header sent by kubelet probes; always in `ALLOWED_HOSTS` |
 | `global.extraAllowedHosts` | `[]` | Extra Host values accepted by all services |
 | `infra.*` | in-cluster names | Endpoints of Kafka, Redis, Postgres, Cassandra, Elasticsearch, RabbitMQ, `awsEndpointUrl`, `awsRegion` |
-| `secrets.existingSecret` | `""` | Secret you created (default name `<release>-secrets`). Keys: `INGEST_API_KEY COPILOT_ADMIN_TOKEN MCP_TOKEN LOG_PSEUDONYM_KEY POSTGRES_PASSWORD RABBITMQ_PASSWORD`, optional `ANTHROPIC_API_KEY` |
+| `secrets.existingSecret` | `""` | Secret you created (default name `<release>-secrets`). Keys: `INGEST_API_KEY COPILOT_ADMIN_TOKEN MCP_TOKEN LOG_PSEUDONYM_KEY POSTGRES_PASSWORD RABBITMQ_PASSWORD CLINICAL_API_TOKEN`, plus `CLINICAL_JWT_SECRET` unless `auth.jwt.jwkSetUri` is set, optional `ANTHROPIC_API_KEY` |
 | `secrets.create` / `secrets.values` | `false` / `{}` | Let the chart render the Secret from `--set secrets.values.X=...` (fails below 32 chars). Prefer External Secrets |
+| `auth.jwt.issuer` / `auth.jwt.jwkSetUri` | `""` / `""` | clinical-api token validation (`CLINICAL_JWT_ISSUER`, `CLINICAL_JWT_JWK_SET_URI`, CONTRACTS 4.2). Empty values are omitted so the service defaults apply (issuer `vitalstream-dev`, HS256 with `CLINICAL_JWT_SECRET`). A JWKS URI switches to RS256 against your OIDC provider. The dev token endpoint is off because `APP_ENV=prod`, and the ingress does not route `/api/v1/dev` |
 | `services.<name>.enabled` | `true` | Toggle a service |
 | `services.<name>.image.{repository,tag}` | `vitalstream/<name>`, appVersion | |
 | `services.<name>.replicaCount` | 1-2 | Ignored when autoscaling is on |
@@ -108,3 +109,9 @@ pgvector on RDS: no parameter group change is needed on PostgreSQL 15.2+; run `C
 - `tflint` is not installed (not available through Homebrew and an automated download was blocked); only `terraform fmt`, `validate` and `test` run.
 - Services do not yet speak SASL/IAM to Kafka or send a Redis AUTH token (contract change needed).
 - HPAs need metrics-server (absent in kind, so disabled there). Single NAT gateway by default.
+
+## clinical-api authentication
+
+clinical-api is an OAuth2 resource server (CONTRACTS 4.2). The chart wires `CLINICAL_JWT_SECRET` (Secret, optional: not needed in JWKS mode), `CLINICAL_JWT_ISSUER` and `CLINICAL_JWT_JWK_SET_URI` (values) into it, and `CLINICAL_API_TOKEN` (Secret, required) into the copilot, which presents it as a `SERVICE` bearer token. Nothing secret is ever a plain value or in a ConfigMap. With `APP_ENV=prod` the copilot fails at startup without a token (empty or under 32 characters), and clinical-api fails at startup in HS256 mode with a missing, default or short `CLINICAL_JWT_SECRET`.
+
+Mint the copilot token from your identity provider (`iss` = `auth.jwt.issuer`, `aud` = `clinical-api`, `sub` = `copilot`, `roles` = `["SERVICE"]`) and give it a lifetime you can rotate: a static token is not refreshed, so rotating it means updating the Secret and restarting the copilot. `deploy/kind/up.sh` does not create `CLINICAL_API_TOKEN` / `CLINICAL_JWT_SECRET` yet (outside the helm paths); the kind copilot needs them in `vitalstream-secrets` to start with `APP_ENV=prod`.

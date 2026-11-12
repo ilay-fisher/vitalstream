@@ -45,6 +45,11 @@ spring:
       enabled: true
 
 vitalstream:
+  app-env: ${APP_ENV:dev}
+  jwt:
+    secret: ${CLINICAL_JWT_SECRET:dev-clinical-jwt-secret-0123456789abcdef}
+    issuer: ${CLINICAL_JWT_ISSUER:vitalstream-dev}
+    jwk-set-uri: ${CLINICAL_JWT_JWK_SET_URI:}
   allowed-hosts: ${ALLOWED_HOSTS:localhost,127.0.0.1,clinical-api}
   elasticsearch:
     url: ${ELASTICSEARCH_URL:http://localhost:9200}
