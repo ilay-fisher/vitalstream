@@ -41,6 +41,8 @@ public class SecurityConfig {
         .cors(Customizer.withDefaults())
         .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
         .authorizeHttpRequests(auth ->
+            // permitAll even when the endpoint is not registered, so a disabled route answers a
+            // plain 404 like any unknown path instead of a 401 that hints something is there
             auth.requestMatchers(HttpMethod.POST, "/api/v1/dev/token")
                 .permitAll()
                 .requestMatchers("/actuator/health", "/actuator/health/**")

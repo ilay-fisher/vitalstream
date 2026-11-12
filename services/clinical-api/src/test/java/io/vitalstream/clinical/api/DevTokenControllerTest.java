@@ -32,7 +32,10 @@ import org.springframework.test.web.servlet.MvcResult;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-/** The dev token endpoint exists only with APP_ENV=dev and JWKS mode off (CONTRACTS 4.2). */
+/**
+ * The dev token endpoint exists only with CLINICAL_DEV_TOKENS_ENABLED=true, APP_ENV=dev and JWKS
+ * mode off (CONTRACTS 4.2).
+ */
 class DevTokenControllerTest {
 
   private static final String BODY =
@@ -50,7 +53,8 @@ class DevTokenControllerTest {
   @WebMvcTest(DevTokenController.class)
   @Import({SecurityConfig.class, Beans.class})
   @EnableConfigurationProperties(ClinicalProperties.class)
-  @TestPropertySource(properties = "vitalstream.app-env=dev")
+  @TestPropertySource(
+      properties = {"vitalstream.app-env=dev", "vitalstream.dev-tokens-enabled=true"})
   class InDev {
 
     @Autowired MockMvc mvc;
@@ -122,11 +126,55 @@ class DevTokenControllerTest {
     }
   }
 
+  /** Opt-in: dev alone is not enough, the flag defaults to off everywhere. */
   @Nested
   @WebMvcTest(DevTokenController.class)
   @Import({SecurityConfig.class, Beans.class})
   @EnableConfigurationProperties(ClinicalProperties.class)
-  @TestPropertySource(properties = "vitalstream.app-env=prod")
+  @TestPropertySource(properties = "vitalstream.app-env=dev")
+  class FlagMissingInDev {
+
+    @Autowired MockMvc mvc;
+    @Autowired ApplicationContext context;
+
+    @Test
+    void noDevBeansAreRegistered() {
+      assertThat(context.getBeanNamesForType(DevTokenController.class)).isEmpty();
+      assertThat(context.getBeanNamesForType(TokenIssuer.class)).isEmpty();
+    }
+
+    @Test
+    void theRouteAnswers404NotUnauthorized() throws Exception {
+      mvc.perform(post("/api/v1/dev/token").contentType(MediaType.APPLICATION_JSON).content(BODY))
+          .andExpect(status().isNotFound());
+    }
+  }
+
+  @Nested
+  @WebMvcTest(DevTokenController.class)
+  @Import({SecurityConfig.class, Beans.class})
+  @EnableConfigurationProperties(ClinicalProperties.class)
+  @TestPropertySource(
+      properties = {"vitalstream.app-env=dev", "vitalstream.dev-tokens-enabled=false"})
+  class FlagFalseInDev {
+
+    @Autowired MockMvc mvc;
+    @Autowired ApplicationContext context;
+
+    @Test
+    void noDevBeansAndRouteIs404() throws Exception {
+      assertThat(context.getBeanNamesForType(DevTokenController.class)).isEmpty();
+      mvc.perform(post("/api/v1/dev/token").contentType(MediaType.APPLICATION_JSON).content(BODY))
+          .andExpect(status().isNotFound());
+    }
+  }
+
+  @Nested
+  @WebMvcTest(DevTokenController.class)
+  @Import({SecurityConfig.class, Beans.class})
+  @EnableConfigurationProperties(ClinicalProperties.class)
+  @TestPropertySource(
+      properties = {"vitalstream.app-env=prod", "vitalstream.dev-tokens-enabled=true"})
   class OutsideDev {
 
     @Autowired MockMvc mvc;
@@ -161,6 +209,7 @@ class DevTokenControllerTest {
   @TestPropertySource(
       properties = {
         "vitalstream.app-env=dev",
+        "vitalstream.dev-tokens-enabled=true",
         "vitalstream.jwt.jwk-set-uri=http://127.0.0.1:1/jwks",
         "vitalstream.jwt.issuer=https://idp.example"
       })

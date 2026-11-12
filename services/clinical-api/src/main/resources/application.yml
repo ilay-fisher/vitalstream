@@ -46,6 +46,7 @@ spring:
 
 vitalstream:
   app-env: ${APP_ENV:dev}
+  dev-tokens-enabled: ${CLINICAL_DEV_TOKENS_ENABLED:false}
   jwt:
     secret: ${CLINICAL_JWT_SECRET:dev-clinical-jwt-secret-0123456789abcdef}
     issuer: ${CLINICAL_JWT_ISSUER:vitalstream-dev}

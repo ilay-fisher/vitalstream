@@ -44,6 +44,7 @@ Tests (Docker needed for integration tests, see CONTRIBUTING section 7 for the C
 | `APP_ENV` | `dev` | anything else enables the secret guard: startup fails if `LOG_PSEUDONYM_KEY`, the Postgres or RabbitMQ password is empty, a dev default or shorter than 32 chars (dev logs one WARN) |
 | `CLINICAL_JWT_SECRET` | `dev-clinical-jwt-secret-0123456789abcdef` | HS256 key (>= 32 bytes) used to verify tokens when no JWKS URI is set; in the secret guard unless JWKS mode is on |
 | `CLINICAL_JWT_JWK_SET_URI` | unset | when set, tokens are verified as RS256 against this JWKS (OIDC provider) and the HMAC secret and dev token endpoint are off |
+| `CLINICAL_DEV_TOKENS_ENABLED` | `false` (compose fragment: `true`) | opt-in for the unauthenticated dev token endpoint; also needs `APP_ENV=dev` and no JWKS URI. Startup fails if it is `true` with `APP_ENV` other than `dev` or with `CLINICAL_JWT_JWK_SET_URI` set; when on, one WARN is logged |
 | `CLINICAL_JWT_ISSUER` | `vitalstream-dev` | required `iss` claim |
 | `LOG_PSEUDONYM_KEY` | `dev-only-pseudonym-key` | HMAC key for `patientRef` in logs (override outside local dev) |
 | `vitalstream.outbox.batch-size`, `vitalstream.outbox.interval-ms` | `50`, `500` | relay tuning (Spring properties) |
@@ -71,8 +72,8 @@ a `by` field in the request body is ignored. Each success writes an INFO audit l
 with `alertId`, `actor` (the `sub`) and the `correlationId` MDC field.
 
 **Dev login.** `POST /api/v1/dev/token` with `{"sub","name"?,"roles":[...]}` returns `{"token","expiresAt"}`
-(HS256, 8 h). It exists only when `APP_ENV=dev` and `CLINICAL_JWT_JWK_SET_URI` is unset; otherwise it answers
-404. It is unauthenticated on purpose (local demo login) and must never run in production.
+(HS256, 8 h). It exists only when `CLINICAL_DEV_TOKENS_ENABLED=true` (default `false`; only the compose fragment sets it),
+`APP_ENV=dev` and `CLINICAL_JWT_JWK_SET_URI` is unset; otherwise it answers 404. It is unauthenticated on purpose (local demo login) and must never run in production.
 
 ```bash
 TOKEN=$(curl -s -X POST localhost:8082/api/v1/dev/token -H 'Content-Type: application/json' \

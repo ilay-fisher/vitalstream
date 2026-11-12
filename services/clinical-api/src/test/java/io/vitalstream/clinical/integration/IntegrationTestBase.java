@@ -61,6 +61,7 @@ abstract class IntegrationTestBase {
     r.add("vitalstream.sqs.endpoint", () -> Infra.LOCALSTACK.getEndpoint().toString());
     r.add("vitalstream.kafka.backoff-initial", () -> "100ms");
     r.add("vitalstream.outbox.interval-ms", () -> "200");
+    r.add("vitalstream.dev-tokens-enabled", () -> "true");
     r.add("vitalstream.sse.heartbeat-ms", () -> "1000");
   }
 
