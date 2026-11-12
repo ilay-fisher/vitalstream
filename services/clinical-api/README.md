@@ -190,7 +190,10 @@ stateDiagram-v2
   ACKNOWLEDGED one stays quiet, metric event `unlinked`).
 - **Notifications.** RabbitMQ `alerts.notify` / SQS (CRITICAL) only when a top-level episode opens,
   escalates or is unlinked while OPEN. Updates, children, acks and resolutions only index and push
-  live. The `alert:suppress` window still applies; the episode id owns it, so an episode's own
+  live. An episode whose `lastSeenAt` is older than `now - ALERT_RESOLVE_AFTER` at that moment
+  (replays, catch-up after downtime, a silent unlinked child) does not notify (equal to the
+  threshold is not stale); it is still written, pushed live and indexed, and counted in
+  `vitalstream_alert_notifications_skipped_total{reason="stale"}`. The `alert:suppress` window still applies; the episode id owns it, so an episode's own
   escalation is never swallowed by its opening notification.
 - **Concurrency.** Kafka keys by patient, but the intake also uses version compare-and-set and the
   unique index: on a lost race the whole step is retried against fresh state (3 attempts, then the
@@ -274,6 +277,7 @@ sequenceDiagram
 `alerts_consumed_total{outcome=opened|updated|escalated|ignored}`, `alerts_suppressed_total`, `alerts_dlq_total`,
 `vitalstream_alerts_raised_total{severity,type}` (detections applied; late or replayed ones are not counted),
 `vitalstream_alert_episodes_total{event=opened|escalated|resolved|unlinked,type}` (CONTRACTS section 7; `unlinked` = a child that became top-level when its NEWS2 parent resolved),
+`vitalstream_alert_notifications_skipped_total{reason=stale}` (notification dropped by the staleness rule, CONTRACTS section 3.4),
 `outbox_lag_seconds` (age of oldest unpublished row), `notifications_sent_total{channel=rabbitmq|sqs}`,
 `cache_requests_total{cache="vitals",result=hit|miss}` plus the standard JVM/HTTP/Kafka metrics.
 
