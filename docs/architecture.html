@@ -233,12 +233,13 @@ sequenceDiagram
   K->>S: micro-batch (maxOffsetsPerTrigger)
   S->>S: drop events > 30 s ahead or > 24 h old, then withWatermark(30 s)
   S->>S: 1-min window per patient → detectors
-  S->>R: latest vitals, EWMA state, alert:emitted ledger
-  S->>K: alerts.detected (alertId = uuid5)
+  S->>R: latest vitals, EWMA state of window means, alert:emitted ledger
+  S->>S: trend-detect query scores each closed window once (append mode)
+  S->>K: alerts.detected (detection id = uuid5)
 </pre>
   </div>
 
-  <h3>2 · One alert, four sinks, exactly once in effect</h3>
+  <h3>2 · Detection to episode, four sinks, exactly once in effect</h3>
   <div class="diagram">
 <pre class="mermaid">
 sequenceDiagram
@@ -253,9 +254,19 @@ sequenceDiagram
   alt cannot parse
     C->>K: alerts.detected.dlq (bytes + error header)
   end
-  C->>P: BEGIN · INSERT alert ON CONFLICT DO NOTHING · INSERT outbox rows · COMMIT
-  Note over C,P: duplicate alertId = no rows, no side effects
-  C->>U: publish (live feed)
+  C->>P: BEGIN · find open episode (patient, type, metric)
+  alt none open
+    C->>P: INSERT episode (partial unique index) · outbox notify
+  else open, newer window
+    C->>P: UPDATE occurrences+1, lastSeenAt · outbox notify only if severity rose
+  else window already applied
+    Note over C,P: replay = no change, no side effects
+  end
+  C->>P: COMMIT
+  C->>U: publish episode (live feed upserts by alertId)
+  loop every 30 s
+    C->>P: resolve episodes silent > 5 min · unlink NEWS2 children
+  end
   loop every few seconds, batches of 50
     O->>P: SELECT unpublished outbox FOR UPDATE SKIP LOCKED
     O->>X: index / notify / escalate
@@ -347,7 +358,7 @@ sequenceDiagram
     <article class="card"><h3>Hexagonal (ports &amp; adapters)</h3><p>Gateway parses FHIR, HL7 and JSON in adapters into one domain event. clinical-api's application layer depends on <code>AlertRepository</code>, not JDBC.</p><p><b>Buys:</b> new device format = new adapter, tests without Docker.</p></article>
     <article class="card"><h3>Strategy</h3><p>Detectors (threshold, EWMA, NEWS2, KMeans) share one interface. The copilot's LLM provider and embedder are strategies chosen by env var.</p><p><b>Buys:</b> fake LLM in CI, Claude in production, same code path.</p></article>
     <article class="card"><h3>Transactional outbox</h3><p>Alert row and outbox rows commit together. A relay publishes with <code>FOR UPDATE SKIP LOCKED</code> and marks <code>published_at</code>.</p><p><b>Buys:</b> no dual-write gap between DB and brokers. <b>Costs:</b> at-least-once delivery, so sinks must be idempotent.</p></article>
-    <article class="card"><h3>Idempotent consumer</h3><p>Gateway: <code>SET idem:{eventId} NX</code>. clinical-api: <code>INSERT … ON CONFLICT DO NOTHING</code> on a deterministic uuid5 alertId. EWMA stores the last applied timestamp.</p><p><b>Buys:</b> replays and retries are harmless.</p></article>
+    <article class="card"><h3>Idempotent consumer</h3><p>Gateway: <code>SET idem:{eventId} NX</code>. clinical-api: an episode stores the latest applied window, so a replayed detection changes nothing; a partial unique index allows one open episode per key. EWMA stores the last applied window.</p><p><b>Buys:</b> replays and retries are harmless.</p></article>
     <article class="card"><h3>Retry + dead-letter queue</h3><p>Spring Kafka retries transient errors with backoff. Poison records go to <code>alerts.detected.dlq</code> with original bytes and an <code>error</code> header.</p><p><b>Buys:</b> one bad message cannot block a partition.</p></article>
     <article class="card"><h3>CQRS-lite</h3><p>Writes go through Kafka and the outbox. Reads are served from read-optimised stores: Cassandra history, Redis latest, ES search.</p><p><b>Buys:</b> each read path scales alone. <b>Costs:</b> eventual consistency between views.</p></article>
     <article class="card"><h3>Cache-aside</h3><p>Vitals history cached in Redis for 10 s keyed by a hash of the query.</p><p><b>Buys:</b> a ward of dashboards polling the same patient hits Cassandra once per 10 s.</p></article>
@@ -376,11 +387,13 @@ sequenceDiagram
       <p>Inputs: respiration rate, SpO2, systolic BP, heart rate, temperature (consciousness and supplemental O2 not modelled).</p>
     </article>
     <article class="card"><h3>EWMA z-score (trend)</h3>
-      <div class="formula">μₜ = μₜ₋₁ + α (xₜ − μₜ₋₁)          α = 0.1
-σ²ₜ = (1 − α) (σ²ₜ₋₁ + α (xₜ − μₜ₋₁)²)
-z = (xₜ − μₜ₋₁) / σₜ₋₁         alert if |z| ≥ 3</div>
-      <p>O(1) memory per patient and metric, held in Redis <code>ewma:{patient}:{metric}</code> with the last applied timestamp so a replayed batch is skipped.</p>
-      <p><b>Known cost:</b> at 3σ on Gaussian noise, about 0.3% of windows alert by chance. A minimum-n warm-up and alert suppression keep that in check.</p>
+      <div class="formula">x̄ₜ = mean of the closed 1-min window        α = 0.2
+z = (x̄ₜ − μₜ₋₁) / σₜ₋₁
+breach = |z| ≥ 3  and  |x̄ₜ − μₜ₋₁| ≥ clinical delta (HR 10, RR 4, SpO2 3 …)
+alert  = 3 of last 5 windows breach in the same direction
+μₜ = μₜ₋₁ + α (x̄ₜ − μₜ₋₁);   σ² updated only when |z| &lt; 3</div>
+      <p>O(1) memory per patient and metric, held in Redis <code>ewma:{patient}:{metric}</code> with the last applied window and a 5-character breach history.</p>
+      <p><b>Why v2:</b> v1 scored every 1 Hz sample, so ~60 tests per metric per minute crossed 3σ by chance and stable patients alerted about 26 times in 15 min. Window means, a clinical delta and 3-of-5 persistence took that to zero. Outliers skip the variance update, or a real shift inflates its own σ and never persists.</p>
     </article>
     <article class="card"><h3>KMeans anomaly score</h3>
       <p>Spark ML trains KMeans offline on standardised 6-feature window means (HR, SpO2, RR, SBP, DBP, temp) from the S3 archive. Centroids are exported to JSON.</p>
@@ -514,6 +527,7 @@ flowchart LR
     <figure><img src="images/dashboard-patient-dark.png" alt="Patient detail in dark mode: six vital charts trending toward deterioration and alert history" loading="lazy" width="1440" height="900"><figcaption>Patient detail: six vitals over an hour, normal bands shaded, alert history with acknowledgement.</figcaption></figure>
     <figure><img src="images/dashboard-copilot-live.png" alt="Copilot panel answering with cited NEWS2 guideline chunks" loading="lazy" width="1440" height="900"><figcaption>Copilot against the real service: cited guideline chunks and token usage.</figcaption></figure>
     <figure><img src="images/dashboard-signin.png" alt="Dev sign-in screen with a choice of clinician or viewer identity" loading="lazy" width="1440" height="900"><figcaption>Dev sign-in: three demo users; the dashboard gets an 8-hour JWT from clinical-api's dev-only token endpoint and keeps it for that tab only.</figcaption></figure>
+    <figure><img src="images/dashboard-alerts-episodes.png" alt="Alert feed with one row per episode: NEWS2 critical with occurrence count, ongoing time and contributing alerts expanded" loading="lazy" width="1440" height="900"><figcaption>Alert episodes, live sepsis run: one row per ongoing condition with count and duration; the single-vital alerts sit under NEWS2.</figcaption></figure>
     <figure><img src="images/dashboard-alerts-viewer.png" alt="Alert feed signed in as a viewer: acknowledge buttons disabled, acknowledged rows show the clinician's name" loading="lazy" width="1440" height="900"><figcaption>Signed in as a viewer: acknowledge is disabled, and each ack shows the name taken from the clinician's token.</figcaption></figure>
     <figure><img src="images/n8n-escalation.png" alt="n8n canvas: RabbitMQ trigger, severity check, wait, token choice, re-read alert from clinical-api, escalate if still open" loading="lazy" width="1440" height="900"><figcaption>n8n escalation: a CRITICAL alert waits for acknowledgement, is re-read from clinical-api with a bearer token, and escalates only if still open.</figcaption></figure>
   </div>
@@ -560,7 +574,8 @@ flowchart LR
 
 <section id="qa">
   <h2>Interview Q&amp;A</h2>
-  <details class="qa"><summary>How do you avoid duplicate alerts end to end?</summary><p>Three layers. The gateway drops duplicate event ids with <code>SET NX</code>. Spark derives alertId with uuid5 from patient, type, metric and window start, and a Redis ledger stops update mode from re-emitting the same alert each micro-batch. clinical-api inserts with <code>ON CONFLICT DO NOTHING</code>, so a redelivered alert creates no row and no outbox entries, which means no second notification.</p></details>
+  <details class="qa"><summary>How do you avoid duplicate alerts end to end?</summary><p>Three layers. The gateway drops duplicate event ids with <code>SET NX</code>. Spark derives a detection id with uuid5 from patient, type, metric and window start, and a Redis ledger stops update mode from re-emitting it each micro-batch. clinical-api folds detections into one episode per condition and ignores a window it already applied, so a redelivery changes nothing and sends no second notification.</p></details>
+  <details class="qa"><summary>How do you fight alarm fatigue?</summary><p>I measured it first: a 15-minute run with 2 sepsis and 8 stable patients produced 517 alerts, up to 11 per patient per minute, and every alert on a stable patient was a false trend alarm. Two causes. The trend detector tested every raw sample, which is a multiple-testing problem; it now scores window means with a clinical minimum change and 3-of-5 persistence. And every minute of an ongoing problem was a new alert; now one episode per condition is updated in place, resolves itself after 5 quiet minutes, and NEWS2 groups the single-vital alerts under it. Same run afterwards: 16 episodes, 2 in the feed, 0 on stable patients. Notifications fire only when an episode opens or gets worse.</p></details>
   <details class="qa"><summary>Why the outbox instead of publishing to RabbitMQ right after the insert?</summary><p>Two writes to two systems cannot be atomic. If the process dies between them you either notify about an alert that does not exist or store one nobody hears about. The outbox puts the intent in the same transaction as the alert; a relay delivers it at least once, and sinks are idempotent by alertId.</p></details>
   <details class="qa"><summary>What happens when a device clock is wrong?</summary><p>The gateway rejects readings more than 5 minutes in the future. The Spark job drops anything further ahead than the watermark delay, or older than 24 hours, before the watermark is computed, and counts the drops. Without that guard one bad clock advances the watermark and every later event is treated as late.</p></details>
   <details class="qa"><summary>How would you scale to 100,000 beds?</summary><p>At one reading per vital per second that is about 600k events/s. Raise <code>vitals.raw</code> partitions (patientId keying keeps order), run more gateway replicas behind the HPA, and move detector logic off the driver into stateful grouped operations so Spark scales by executors. Cassandra scales horizontally with the day-bucketed key. Watch consumer lag and outbox lag as the scaling signals.</p></details>
