@@ -129,7 +129,7 @@ Clinicians see **episodes**, not per-window detections. An episode is one ongoin
 | Hierarchy | NEWS2 is the parent. A THRESHOLD, TREND_ZSCORE or ML_ANOMALY episode of a patient with a non-RESOLVED NEWS2 episode gets `parentAlertId` = that NEWS2 episode **if its severity ≤ the parent's**; a child that outranks the parent stays top-level. When a NEWS2 episode opens, the patient's open qualifying episodes are linked to it; when it resolves, still-open children are unlinked (become top-level). Escalation is re-checked on each update. An unlinked child still **OPEN** counts as opening for notification (it was never paged on its own); an unlinked ACKNOWLEDGED child does not notify. |
 | Notify | RabbitMQ `alerts.notify` and SQS (CRITICAL) get a message only when a **top-level** episode opens, escalates, or becomes top-level while OPEN (unlink, child outranking parent) (`AlertView` body, routing key by the episode's current severity). Updates, children, acks and resolutions do not notify. The existing `alert:suppress` window still applies on top. |
 | Live feed | SSE emits `event: alert` with the full AlertView on every episode change (open, update, escalation, ack, resolve, link/unlink), `id: <alertId>:<version>`; clients upsert by `alertId`. A change to a child's link or status also changes the parent's `childCount`, so the parent gets `version + 1`, an SSE emission and an ES upsert too. No replay on reconnect: clients refetch the list after a gap. |
-| Legacy rows | Flyway migration: per key keep the newest non-RESOLVED row open (occurrences = number of rows for the key since its first open row), resolve the rest with `resolvedAt = migration time`; `firstSeenAt = window_start`, `lastSeenAt = window_end` for every row. |
+| Legacy rows | Flyway migration: per key keep the newest non-RESOLVED row open (occurrences = number of rows for the key since its first open row), resolve the rest with `resolvedAt = migration time`; `firstSeenAt = window_start`, `lastSeenAt = window_end` for every row (so a migrated open episode's `firstSeenAt` is its newest window, not the start of the run; acceptable for demo data). Known gap: a new consumer group replaying 30 days of `alerts.detected` opens and pages old episodes before the resolver closes them; a staleness guard on notification is future work. |
 
 ## 4. REST APIs
 
@@ -152,7 +152,7 @@ Gateway behaviour: validate → idempotency check in Redis → publish to Kafka 
 | GET | `/api/v1/patients` | list with latest vitals (from Redis) + open alert count (`openAlerts` = top-level OPEN/ACKNOWLEDGED episodes) |
 | GET | `/api/v1/patients/{id}` | patient + latest vitals |
 | GET | `/api/v1/patients/{id}/vitals?metric=&from=&to=&resolution=raw\|minute` | from Cassandra; cache-aside in Redis (TTL 10 s) |
-| GET | `/api/v1/alerts?patientId=&severity=&status=&type=&topLevel=&parentAlertId=&q=&page=&size=` | episodes (§3.4). `status` repeatable (`status=OPEN&status=ACKNOWLEDGED`). `topLevel=true` → only episodes without `parentAlertId`; `parentAlertId=<id>` → that episode's children. Sorted by `lastSeenAt` desc. `q` → Elasticsearch full text, otherwise Postgres; every other filter applies on both paths |
+| GET | `/api/v1/alerts?patientId=&severity=&status=&type=&topLevel=&parentAlertId=&q=&page=&size=` | episodes (§3.4). `status` repeatable (`status=OPEN&status=ACKNOWLEDGED`). `topLevel=true` → only episodes without `parentAlertId` (`false` or absent = no filter); `parentAlertId=<id>` → that episode's children. Sorted by `lastSeenAt` desc. `q` → Elasticsearch full text, otherwise Postgres; every other filter applies on both paths |
 | GET | `/api/v1/alerts/{id}` | |
 | POST | `/api/v1/alerts/{id}/ack` | `{"note":"..."}` → status ACKNOWLEDGED; actor from the JWT (§4.2), role CLINICIAN |
 | GET | `/api/v1/alerts/stream` | Server-Sent Events, event `alert` with AlertView JSON |
@@ -310,7 +310,7 @@ JSON log fields: `timestamp`, `level`, `service`, `correlationId`, `message`, pl
 | `vitalstream_events_rejected_total` | counter | `reason` | ingest-gateway |
 | `vitalstream_events_dropped_total` | counter | `reason` (future\|stale) | stream-processor |
 | `vitalstream_alerts_raised_total` | counter | `severity`, `type` | stream-processor (detected), clinical-api (persisted) – add label `service` via scrape config |
-| `vitalstream_alert_episodes_total` | counter | `event` (opened\|escalated\|unlinked\|resolved), `type` | clinical-api (§3.4); its `vitalstream_alerts_raised_total` counts detections received |
+| `vitalstream_alert_episodes_total` | counter | `event` (opened\|escalated\|unlinked\|resolved), `type` | clinical-api (§3.4); its `vitalstream_alerts_raised_total` counts detections applied (late/replayed ones ignored by §3.4 are not counted) |
 | `http_server_requests_seconds_bucket` | histogram | Spring default | Java services |
 | `kafka_consumergroup_lag` | gauge | kafka-exporter | foundation |
 
