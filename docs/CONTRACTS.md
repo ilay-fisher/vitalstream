@@ -193,7 +193,7 @@ clinical-api is an OAuth2 resource server (Spring Security). Every `/api/v1/**` 
 | Errors | missing/invalid/expired token → 401 problem+json with `WWW-Authenticate: Bearer`; valid token, wrong role → 403 problem+json. Never log tokens. |
 | Ack actor | Request body is `{"note"?}` (max 1000 chars). `acknowledgedBy` = token `name`, else `sub`. A `by` field in the body is ignored, never trusted. INFO audit log `alert acknowledged` with `alertId`, actor `sub`, `correlationId`. |
 | SSE | same Bearer header. Browsers read the stream with `fetch` + `ReadableStream` (EventSource cannot send headers). Tokens never go in URLs or query strings. |
-| Dev token endpoint | `POST /api/v1/dev/token` body `{"sub","name"?,"roles":[…]}` → `{"token","expiresAt"}` (HS256, TTL 8 h). Registered only when `APP_ENV=dev` and JWKS mode is off; otherwise 404. Unauthenticated by design (local demo login). |
+| Dev token endpoint | `POST /api/v1/dev/token` body `{"sub","name"?,"roles":[…]}` → `{"token","expiresAt"}` (HS256, TTL 8 h). Opt-in: registered only when **all three** hold: `CLINICAL_DEV_TOKENS_ENABLED=true` (default `false`; only the compose fragment sets it), `APP_ENV=dev`, and JWKS mode is off. Otherwise the route does not exist (404). Startup **fails** if `CLINICAL_DEV_TOKENS_ENABLED=true` while `APP_ENV != dev` or while `CLINICAL_JWT_JWK_SET_URI` is set. When registered, log one WARN at startup ("dev token endpoint enabled: unauthenticated token minting"). Unauthenticated by design (local demo login); may issue every role, including `SERVICE` (used by copilot `/mcp` and n8n in dev). |
 | Startup guard | `CLINICAL_JWT_SECRET` joins the §4.1 secret guard when HS256 mode is used outside dev. |
 
 Clients:
@@ -256,6 +256,7 @@ CREATE TABLE vitals_by_minute (patient_id text, metric text, day date, window_st
 | `CLINICAL_JWT_SECRET` | `dev-clinical-jwt-secret-0123456789abcdef` | clinical-api (HS256 mode) |
 | `CLINICAL_JWT_JWK_SET_URI` | unset | clinical-api (RS256/OIDC mode when set) |
 | `CLINICAL_JWT_ISSUER` | `vitalstream-dev` | clinical-api |
+| `CLINICAL_DEV_TOKENS_ENABLED` | `false` (compose fragment: `true`) | clinical-api (dev token endpoint opt-in, §4.2) |
 | `CLINICAL_API_TOKEN` | unset (dev: fetched from dev token endpoint) | copilot |
 | `CLINICAL_API_URL` | `http://localhost:8082` | copilot, dashboard |
 | `INGEST_GATEWAY_URL` | `http://localhost:8081` | simulator |
