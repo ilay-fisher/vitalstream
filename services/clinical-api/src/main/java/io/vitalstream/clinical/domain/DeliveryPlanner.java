@@ -3,21 +3,32 @@ package io.vitalstream.clinical.domain;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Chooses which downstream sinks a newly stored alert must reach. */
+/** Chooses which downstream sinks a changed episode must reach. */
 public final class DeliveryPlanner {
 
   private DeliveryPlanner() {}
 
   /**
-   * Every alert is indexed so search stays complete; only unsuppressed alerts notify, and only
-   * critical ones escalate.
+   * Only a top-level episode that just opened or escalated may page anyone: updates, children,
+   * acknowledgements and resolutions are shown live but stay quiet (CONTRACTS section 3.4). An
+   * unlinked episode pages only while still OPEN: an acknowledged one already has an owner.
    */
-  public static List<OutboxEventType> plan(Alert alert, boolean suppressed) {
+  public static boolean notifies(Alert episode, EpisodeChange change) {
+    boolean owned = change == EpisodeChange.UNLINKED && episode.status() != AlertStatus.OPEN;
+    return change.mayNotify() && episode.isTopLevel() && !owned;
+  }
+
+  /**
+   * Every change is indexed so search stays complete; only unsuppressed notifying changes notify,
+   * and only critical ones escalate.
+   */
+  public static List<OutboxEventType> plan(
+      Alert episode, EpisodeChange change, boolean suppressed) {
     List<OutboxEventType> plan = new ArrayList<>();
     plan.add(OutboxEventType.ALERT_INDEX);
-    if (!suppressed) {
+    if (notifies(episode, change) && !suppressed) {
       plan.add(OutboxEventType.ALERT_NOTIFY);
-      if (alert.severity().escalates()) {
+      if (episode.severity().escalates()) {
         plan.add(OutboxEventType.ALERT_ESCALATE);
       }
     }

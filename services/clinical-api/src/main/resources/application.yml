@@ -59,6 +59,9 @@ vitalstream:
   sqs:
     endpoint: ${AWS_ENDPOINT_URL:}
     region: ${AWS_REGION:us-east-1}
+  episodes:
+    # ISO-8601 silence after which an episode auto-resolves (CONTRACTS section 3.4)
+    resolve-after: ${ALERT_RESOLVE_AFTER:PT5M}
 
 management:
   endpoints:

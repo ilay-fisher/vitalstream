@@ -7,7 +7,6 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
@@ -24,7 +23,6 @@ import io.vitalstream.clinical.domain.TestAlerts;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,7 +34,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 class AlertAckServiceTest {
 
-  private final AlertRepository alerts = mock(AlertRepository.class);
+  private final InMemoryAlertRepository alerts = new InMemoryAlertRepository();
   private final OutboxRepository outbox = mock(OutboxRepository.class);
   private final LiveFeedPublisher liveFeed = mock(LiveFeedPublisher.class);
   private static final AckActor COHEN = new AckActor("dr.cohen", "Dr. Cohen");
@@ -58,17 +56,29 @@ class AlertAckServiceTest {
             Clock.fixed(Instant.parse("2026-11-11T20:20:00Z"), ZoneOffset.UTC));
   }
 
-  @Test
-  void acknowledgesPersistsWithExpectedVersionIndexesAndPublishes() {
+  @AfterEach
+  void detachAppender() {
+    ((Logger) LoggerFactory.getLogger(AlertAckService.class)).detachAppender(logs);
+    MDC.clear();
+  }
+
+  private Alert seedOpen() {
     Alert open = TestAlerts.alert(Severity.HIGH).withVersion(4);
-    when(alerts.findById(open.id())).thenReturn(Optional.of(open));
-    when(alerts.updateAcknowledgement(any(), org.mockito.ArgumentMatchers.eq(4L))).thenReturn(true);
+    alerts.seed(open);
+    return open;
+  }
+
+  @Test
+  void acknowledgesPersistsBumpsVersionIndexesAndPublishes() {
+    Alert open = seedOpen();
 
     AlertView view = service.acknowledge(open.id(), COHEN, "seen");
 
     assertThat(view.status()).isEqualTo(AlertStatus.ACKNOWLEDGED);
     assertThat(view.acknowledgedBy()).isEqualTo("Dr. Cohen");
+    assertThat(view.acknowledgementNote()).isEqualTo("seen");
     assertThat(view.version()).isEqualTo(5);
+    assertThat(alerts.get(open.id()).status()).isEqualTo(AlertStatus.ACKNOWLEDGED);
     ArgumentCaptor<OutboxEntry> row = ArgumentCaptor.forClass(OutboxEntry.class);
     verify(outbox).add(row.capture());
     assertThat(row.getValue().eventType()).isEqualTo(OutboxEventType.ALERT_INDEX);
@@ -76,20 +86,57 @@ class AlertAckServiceTest {
   }
 
   @Test
-  void unknownAlertIsNotFound() {
-    UUID id = UUID.randomUUID();
-    when(alerts.findById(id)).thenReturn(Optional.empty());
+  void viewKeepsEpisodeFieldsAndChildCount() {
+    Alert parent = TestAlerts.alert(Severity.HIGH);
+    alerts.seed(parent);
+    alerts.seed(TestAlerts.alert(Severity.LOW).withParent(parent.id()));
 
-    assertThatThrownBy(() -> service.acknowledge(id, DR, null))
+    AlertView view = service.acknowledge(parent.id(), DR, null);
+
+    assertThat(view.childCount()).isEqualTo(1);
+    assertThat(view.occurrences()).isEqualTo(1);
+  }
+
+  @Test
+  void unknownAlertIsNotFound() {
+    assertThatThrownBy(() -> service.acknowledge(UUID.randomUUID(), DR, null))
         .isInstanceOf(AlertNotFoundException.class);
   }
 
   @Test
-  void lostOptimisticLockRaisesConflictAndWritesNothingElse() {
-    Alert open = TestAlerts.alert(Severity.HIGH);
-    when(alerts.findById(open.id())).thenReturn(Optional.of(open));
-    when(alerts.updateAcknowledgement(any(), org.mockito.ArgumentMatchers.anyLong()))
-        .thenReturn(false);
+  void anAcknowledgedEpisodeCannotBeAcknowledgedAgain() {
+    Alert acked = TestAlerts.alert(Severity.HIGH).acknowledge("a", null, Instant.now());
+    alerts.seed(acked);
+
+    assertThatThrownBy(() -> service.acknowledge(acked.id(), DR, null))
+        .isInstanceOf(InvalidStatusTransitionException.class);
+    verify(outbox, never()).add(any());
+  }
+
+  @Test
+  void aResolvedEpisodeCannotBeAcknowledged() {
+    Alert resolved = TestAlerts.alert(Severity.HIGH).resolve(Instant.now());
+    alerts.seed(resolved);
+
+    assertThatThrownBy(() -> service.acknowledge(resolved.id(), DR, null))
+        .isInstanceOf(InvalidStatusTransitionException.class);
+  }
+
+  @Test
+  void aVersionClashFromAConcurrentIngestUpdateIsRetriedServerSide() {
+    Alert open = seedOpen();
+    alerts.failingWrites = 2;
+
+    AlertView view = service.acknowledge(open.id(), DR, null);
+
+    assertThat(view.status()).isEqualTo(AlertStatus.ACKNOWLEDGED);
+    assertThat(alerts.get(open.id()).status()).isEqualTo(AlertStatus.ACKNOWLEDGED);
+  }
+
+  @Test
+  void givesUpWithAConflictAfterThreeClashes() {
+    Alert open = seedOpen();
+    alerts.failingWrites = 3;
 
     assertThatThrownBy(() -> service.acknowledge(open.id(), DR, null))
         .isInstanceOf(ConcurrentAlertUpdateException.class);
@@ -98,38 +145,48 @@ class AlertAckServiceTest {
   }
 
   @Test
-  void alreadyAcknowledgedAlertIsRejected() {
-    Alert acked = TestAlerts.alert(Severity.HIGH).acknowledge("a", null, Instant.now());
-    when(alerts.findById(acked.id())).thenReturn(Optional.of(acked));
+  void whenTheClashWasAResolutionTheRetryReportsTheConflictOfTheNewState() {
+    Alert open = seedOpen();
+    alerts.failingWrites = 1;
+    // the competing writer resolves the episode before our retry reads it again
+    InMemoryAlertRepository resolving =
+        new InMemoryAlertRepository() {
+          @Override
+          public boolean updateAcknowledgement(Alert acknowledged, long expectedVersion) {
+            boolean ok = super.updateAcknowledgement(acknowledged, expectedVersion);
+            if (!ok) {
+              seed(get(acknowledged.id()).resolve(Instant.now()));
+            }
+            return ok;
+          }
+        };
+    resolving.seed(open);
+    resolving.failingWrites = 1;
+    AlertAckService racing =
+        new AlertAckService(
+            resolving,
+            outbox,
+            liveFeed,
+            new DirectUnitOfWork(),
+            new OutboxPayloads(JsonMapper.builder().build()),
+            Clock.fixed(Instant.parse("2026-11-11T20:20:00Z"), ZoneOffset.UTC));
 
-    assertThatThrownBy(() -> service.acknowledge(acked.id(), DR, null))
+    assertThatThrownBy(() -> racing.acknowledge(open.id(), DR, null))
         .isInstanceOf(InvalidStatusTransitionException.class);
   }
 
   @Test
   void liveFeedFailureDoesNotFailAcknowledgement() {
-    Alert open = TestAlerts.alert(Severity.HIGH);
-    when(alerts.findById(open.id())).thenReturn(Optional.of(open));
-    when(alerts.updateAcknowledgement(any(), org.mockito.ArgumentMatchers.anyLong()))
-        .thenReturn(true);
+    Alert open = seedOpen();
     doThrow(new IllegalStateException("redis down")).when(liveFeed).publish(any());
 
     assertThat(service.acknowledge(open.id(), DR, null).status())
         .isEqualTo(AlertStatus.ACKNOWLEDGED);
   }
 
-  @AfterEach
-  void detachAppender() {
-    ((Logger) LoggerFactory.getLogger(AlertAckService.class)).detachAppender(logs);
-    MDC.clear();
-  }
-
   @Test
   void writesAnInfoAuditLineWithAlertIdActorSubAndCorrelationId() {
-    Alert open = TestAlerts.alert(Severity.HIGH);
-    when(alerts.findById(open.id())).thenReturn(Optional.of(open));
-    when(alerts.updateAcknowledgement(any(), org.mockito.ArgumentMatchers.anyLong()))
-        .thenReturn(true);
+    Alert open = seedOpen();
     MDC.put("correlationId", "corr-audit");
 
     service.acknowledge(open.id(), COHEN, "seen");
@@ -148,10 +205,7 @@ class AlertAckServiceTest {
 
   @Test
   void auditLineNeverCarriesTheFreeTextNote() {
-    Alert open = TestAlerts.alert(Severity.HIGH);
-    when(alerts.findById(open.id())).thenReturn(Optional.of(open));
-    when(alerts.updateAcknowledgement(any(), org.mockito.ArgumentMatchers.anyLong()))
-        .thenReturn(true);
+    Alert open = seedOpen();
 
     service.acknowledge(open.id(), COHEN, "patient is Dana Levi");
 
@@ -160,10 +214,8 @@ class AlertAckServiceTest {
 
   @Test
   void noAuditLineWhenTheAcknowledgementFails() {
-    Alert open = TestAlerts.alert(Severity.HIGH);
-    when(alerts.findById(open.id())).thenReturn(Optional.of(open));
-    when(alerts.updateAcknowledgement(any(), org.mockito.ArgumentMatchers.anyLong()))
-        .thenReturn(false);
+    Alert open = seedOpen();
+    alerts.failingWrites = 3;
 
     assertThatThrownBy(() -> service.acknowledge(open.id(), COHEN, null))
         .isInstanceOf(ConcurrentAlertUpdateException.class);

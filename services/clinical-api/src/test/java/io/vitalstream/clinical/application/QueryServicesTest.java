@@ -30,7 +30,8 @@ class QueryServicesTest {
 
   @Test
   void listWithoutTextQueryUsesPostgres() {
-    AlertFilter filter = new AlertFilter("P-0001", Severity.HIGH, null, null, 0, 20);
+    AlertFilter filter =
+        new AlertFilter("P-0001", Severity.HIGH, null, null, false, null, null, 0, 20);
     PageResult<AlertView> page = new PageResult<>(List.of(), 0, 20, 0);
     when(alerts.search(filter)).thenReturn(page);
 
@@ -40,7 +41,7 @@ class QueryServicesTest {
 
   @Test
   void listWithTextQueryUsesElasticsearch() {
-    AlertFilter filter = new AlertFilter(null, null, null, "heart", 1, 10);
+    AlertFilter filter = new AlertFilter(null, null, null, null, false, null, "heart", 1, 10);
     PageResult<AlertView> page = new PageResult<>(List.of(), 1, 10, 0);
     when(search.search(filter)).thenReturn(page);
 
@@ -50,7 +51,7 @@ class QueryServicesTest {
 
   @Test
   void blankTextQueryFallsBackToPostgres() {
-    AlertFilter filter = new AlertFilter(null, null, null, "  ", 0, 10);
+    AlertFilter filter = new AlertFilter(null, null, null, null, false, null, "  ", 0, 10);
     when(alerts.search(filter)).thenReturn(new PageResult<>(List.of(), 0, 10, 0));
 
     new AlertQueryService(alerts, search).list(filter);
