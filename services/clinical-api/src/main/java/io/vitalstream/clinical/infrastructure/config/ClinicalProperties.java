@@ -13,7 +13,17 @@ public record ClinicalProperties(
     @DefaultValue Sqs sqs,
     @DefaultValue Elasticsearch elasticsearch,
     @DefaultValue Cassandra cassandra,
-    @DefaultValue Cors cors) {
+    @DefaultValue Cors cors,
+    @DefaultValue Jwt jwt,
+    @DefaultValue("dev") String appEnv) {
+
+  /**
+   * The dev token endpoint is a local-demo login without credentials, so it exists only in {@code
+   * dev} and never when an external identity provider (JWKS) is configured.
+   */
+  public boolean devTokensEnabled() {
+    return "dev".equals(appEnv) && !jwt.jwksMode();
+  }
 
   /** Outbox relay batch size (the polling interval is {@code vitalstream.outbox.interval-ms}). */
   public record Outbox(@DefaultValue("50") int batchSize) {}
@@ -51,4 +61,18 @@ public record ClinicalProperties(
   /** Browser origins allowed to call the API (dashboard in prod build and Vite dev). */
   public record Cors(
       @DefaultValue({"http://localhost:3000", "http://localhost:5173"}) String[] allowedOrigins) {}
+
+  /**
+   * Token validation settings. A non-blank {@code jwkSetUri} selects RS256 via JWKS, otherwise
+   * tokens are HS256 signed with {@code secret}.
+   */
+  public record Jwt(
+      @DefaultValue("dev-clinical-jwt-secret-0123456789abcdef") String secret,
+      @DefaultValue("vitalstream-dev") String issuer,
+      @DefaultValue("") String jwkSetUri) {
+
+    public boolean jwksMode() {
+      return jwkSetUri != null && !jwkSetUri.isBlank();
+    }
+  }
 }

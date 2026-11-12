@@ -88,7 +88,8 @@ abstract class IntegrationTestBase {
 
   /** GET with the given bearer token, or none at all when {@code token} is null. */
   protected HttpResponse<String> get(String path, String token) throws Exception {
-    return http.send(authorized(HttpRequest.newBuilder(URI.create(url(path))), token).GET().build(),
+    return http.send(
+        authorized(HttpRequest.newBuilder(URI.create(url(path))), token).GET().build(),
         HttpResponse.BodyHandlers.ofString());
   }
 

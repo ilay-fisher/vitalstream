@@ -24,6 +24,7 @@ import io.vitalstream.clinical.application.VitalsQueryService;
 import io.vitalstream.clinical.domain.Severity;
 import io.vitalstream.clinical.domain.TestAlerts;
 import io.vitalstream.clinical.infrastructure.config.ClinicalProperties;
+import io.vitalstream.clinical.infrastructure.config.WebConfig;
 import io.vitalstream.clinical.infrastructure.security.SecurityConfig;
 import io.vitalstream.clinical.infrastructure.security.TestTokens;
 import java.time.Clock;
@@ -45,7 +46,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /** CONTRACTS section 4.2: who may call what, and the shape of the 401 and 403 answers. */
 @WebMvcTest({AlertController.class, PatientController.class, DevTokenController.class})
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, WebConfig.class})
 @EnableConfigurationProperties(ClinicalProperties.class)
 class SecurityRulesTest {
 
@@ -72,13 +73,12 @@ class SecurityRulesTest {
             .map(r -> new SimpleGrantedAuthority("ROLE_" + r))
             .toArray(SimpleGrantedAuthority[]::new);
     return jwt()
-        .jwt(
-            j -> {
-              j.subject(sub);
-              if (name != null) {
-                j.claim("name", name);
-              }
-            })
+        .jwt(j -> {
+          j.subject(sub);
+          if (name != null) {
+            j.claim("name", name);
+          }
+        })
         .authorities(authorities);
   }
 
@@ -168,8 +168,7 @@ class SecurityRulesTest {
     mvc.perform(
             get("/api/v1/patients")
                 .header(
-                    "Authorization",
-                    bearer(TestTokens.valid("observer", "Observer", "VIEWER"))))
+                    "Authorization", bearer(TestTokens.valid("observer", "Observer", "VIEWER"))))
         .andExpect(status().isOk());
   }
 
@@ -275,8 +274,7 @@ class SecurityRulesTest {
     AlertView acked =
         AlertView.from(
             TestAlerts.alert(Severity.HIGH).acknowledge("Nurse Levi", "on it", Instant.now()));
-    when(acks.acknowledge(id, new AckActor("nurse.levi", "Nurse Levi"), "on it"))
-        .thenReturn(acked);
+    when(acks.acknowledge(id, new AckActor("nurse.levi", "Nurse Levi"), "on it")).thenReturn(acked);
 
     mvc.perform(
             post("/api/v1/alerts/" + id + "/ack")
@@ -309,7 +307,8 @@ class SecurityRulesTest {
     when(acks.acknowledge(id, new AckActor("dr.cohen", "Dr. Cohen"), null))
         .thenReturn(AlertView.from(TestAlerts.alert(Severity.HIGH)));
 
-    mvc.perform(post("/api/v1/alerts/" + id + "/ack").with(as("dr.cohen", "Dr. Cohen", "CLINICIAN")))
+    mvc.perform(
+            post("/api/v1/alerts/" + id + "/ack").with(as("dr.cohen", "Dr. Cohen", "CLINICIAN")))
         .andExpect(status().isOk());
   }
 
@@ -331,8 +330,7 @@ class SecurityRulesTest {
     String clinician = TestTokens.valid("nurse.levi", "Nurse Levi", "CLINICIAN");
     String viewer = TestTokens.valid("observer", "Observer", "VIEWER");
 
-    mvc.perform(
-            post("/api/v1/alerts/" + id + "/ack").header("Authorization", bearer(clinician)))
+    mvc.perform(post("/api/v1/alerts/" + id + "/ack").header("Authorization", bearer(clinician)))
         .andExpect(status().isOk());
     mvc.perform(post("/api/v1/alerts/" + id + "/ack").header("Authorization", bearer(viewer)))
         .andExpect(status().isForbidden());

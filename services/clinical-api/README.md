@@ -42,10 +42,43 @@ Tests (Docker needed for integration tests, see CONTRIBUTING section 7 for the C
 | `LOG_LEVEL` | `INFO` | root log level |
 | `ALLOWED_HOSTS` | `localhost,127.0.0.1,clinical-api` | `Host` header allowlist (DNS-rebinding defence); bare names also match with the serving port, others get 400 problem+json |
 | `APP_ENV` | `dev` | anything else enables the secret guard: startup fails if `LOG_PSEUDONYM_KEY`, the Postgres or RabbitMQ password is empty, a dev default or shorter than 32 chars (dev logs one WARN) |
+| `CLINICAL_JWT_SECRET` | `dev-clinical-jwt-secret-0123456789abcdef` | HS256 key (>= 32 bytes) used to verify tokens when no JWKS URI is set; in the secret guard unless JWKS mode is on |
+| `CLINICAL_JWT_JWK_SET_URI` | unset | when set, tokens are verified as RS256 against this JWKS (OIDC provider) and the HMAC secret and dev token endpoint are off |
+| `CLINICAL_JWT_ISSUER` | `vitalstream-dev` | required `iss` claim |
 | `LOG_PSEUDONYM_KEY` | `dev-only-pseudonym-key` | HMAC key for `patientRef` in logs (override outside local dev) |
 | `vitalstream.outbox.batch-size`, `vitalstream.outbox.interval-ms` | `50`, `500` | relay tuning (Spring properties) |
 | `vitalstream.kafka.retries`, `.backoff-initial`, `.backoff-multiplier` | `3`, `500ms`, `2.0` | consumer retry before DLQ |
 | `vitalstream.cors.allowed-origins` | `http://localhost:3000,http://localhost:5173` | CORS |
+
+## Authentication and roles
+
+clinical-api is an OAuth2 resource server (CONTRACTS section 4.2). Every `/api/v1/**` call needs
+`Authorization: Bearer <JWT>` with `iss` = `CLINICAL_JWT_ISSUER`, `aud` containing `clinical-api`,
+`sub` and `exp` (30 s clock skew). The `roles` claim maps to authorities; unknown roles are ignored.
+
+| Role | GET (incl. `/alerts/stream`) | `POST /alerts/{id}/ack` |
+|---|---|---|
+| `CLINICIAN` | yes | yes |
+| `VIEWER` | yes | 403 |
+| `SERVICE` (machine clients such as the copilot) | yes | 403 |
+
+`/actuator/health/**` and `/actuator/prometheus` are open; Swagger UI and `/v3/api-docs` need a token;
+anything else under `/api` is denied. Missing, invalid or expired token: 401 `application/problem+json`
+with `WWW-Authenticate: Bearer`. Valid token, wrong role: 403 `application/problem+json`. Tokens are never logged.
+
+The acknowledging user is the token, never the body: `acknowledgedBy` is the `name` claim, else `sub`;
+a `by` field in the request body is ignored. Each success writes an INFO audit line `alert acknowledged`
+with `alertId`, `actor` (the `sub`) and the `correlationId` MDC field.
+
+**Dev login.** `POST /api/v1/dev/token` with `{"sub","name"?,"roles":[...]}` returns `{"token","expiresAt"}`
+(HS256, 8 h). It exists only when `APP_ENV=dev` and `CLINICAL_JWT_JWK_SET_URI` is unset; otherwise it answers
+404. It is unauthenticated on purpose (local demo login) and must never run in production.
+
+```bash
+TOKEN=$(curl -s -X POST localhost:8082/api/v1/dev/token -H 'Content-Type: application/json' \
+  -d '{"sub":"nurse.levi","name":"Nurse Levi","roles":["CLINICIAN"]}' | jq -r .token)
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8082/api/v1/patients | jq
+```
 
 ## Endpoints
 
@@ -53,6 +86,7 @@ Swagger UI: `/swagger-ui.html`, OpenAPI: `/v3/api-docs`, health: `/actuator/heal
 Errors are RFC 9457 `application/problem+json` with a `correlationId` property.
 
 ```bash
+# all calls below need -H "Authorization: Bearer $TOKEN" (see Authentication above)
 curl -s localhost:8082/api/v1/patients | jq                       # patients + latest vitals (Redis) + open alert count
 curl -s localhost:8082/api/v1/patients/P-0001 | jq
 curl -s "localhost:8082/api/v1/patients/P-0001/vitals?metric=HEART_RATE&from=2026-11-11T20:00:00Z&to=2026-11-11T21:00:00Z&resolution=minute" | jq
@@ -60,7 +94,7 @@ curl -s "localhost:8082/api/v1/alerts?patientId=P-0001&severity=CRITICAL&status=
 curl -s "localhost:8082/api/v1/alerts?q=oxygen" | jq                # full text via Elasticsearch
 curl -s localhost:8082/api/v1/alerts/<alertId> | jq
 curl -s -X POST localhost:8082/api/v1/alerts/<alertId>/ack -H 'Content-Type: application/json' \
-     -d '{"by":"dr.cohen","note":"at bedside"}' | jq             # 409 if already acknowledged / concurrent change
+     -d '{"note":"at bedside"}' | jq                             # 409 if already acknowledged / concurrent change
 curl -N -H 'Accept: text/event-stream' localhost:8082/api/v1/alerts/stream   # live feed, event "alert"
 ```
 
@@ -96,7 +130,7 @@ With `resolution=minute` the response has `"resolution":"MINUTE"` and points are
 {"items":[<AlertView>],"page":0,"size":20,"totalElements":31,"totalPages":2}
 ```
 
-`GET /api/v1/alerts/{id}` and `POST /api/v1/alerts/{id}/ack` (body `{"by":"dr.cohen","note":"..."}`, `by` required) return an `AlertView`:
+`GET /api/v1/alerts/{id}` and `POST /api/v1/alerts/{id}/ack` (body `{"note":"..."}`, optional; the actor comes from the token) return an `AlertView`:
 
 ```json
 {"alertId":"0b7f9c3e-2a41-4f7e-9d0d-5c1a2b3c4d5e","patientId":"P-0001","type":"NEWS2","severity":"HIGH",

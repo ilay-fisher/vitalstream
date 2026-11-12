@@ -57,19 +57,21 @@ class DevTokenControllerTest {
     @Test
     void issuesAnHs256TokenTheResourceServerAccepts() throws Exception {
       MvcResult result =
-          mvc.perform(post("/api/v1/dev/token").contentType(MediaType.APPLICATION_JSON).content(BODY))
+          mvc.perform(
+                  post("/api/v1/dev/token").contentType(MediaType.APPLICATION_JSON).content(BODY))
               .andExpect(status().isOk())
               .andExpect(jsonPath("$.token").isNotEmpty())
               .andExpect(jsonPath("$.expiresAt").isNotEmpty())
               .andReturn();
-      JsonNode json = JsonMapper.builder().build().readTree(result.getResponse().getContentAsString());
+      JsonNode json =
+          JsonMapper.builder().build().readTree(result.getResponse().getContentAsString());
 
       Jwt jwt = decoder.decode(json.path("token").asString());
 
       assertThat(jwt.getSubject()).isEqualTo("nurse.levi");
       assertThat(jwt.getClaimAsString("name")).isEqualTo("Nurse Levi");
       assertThat(jwt.getClaimAsStringList("roles")).containsExactly("CLINICIAN");
-      assertThat(jwt.getIssuer().toString()).isEqualTo("vitalstream-dev");
+      assertThat(jwt.getClaimAsString("iss")).isEqualTo("vitalstream-dev");
       assertThat(jwt.getAudience()).containsExactly("clinical-api");
       assertThat(jwt.getHeaders()).containsEntry("alg", "HS256");
       assertThat(Duration.between(Instant.now(), jwt.getExpiresAt()))

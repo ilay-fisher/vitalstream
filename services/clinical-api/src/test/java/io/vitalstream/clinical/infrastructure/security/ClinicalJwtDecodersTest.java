@@ -82,11 +82,10 @@ class ClinicalJwtDecodersTest {
   void rejectsExpiredTokenBeyondTheThirtySecondSkew() {
     Instant now = Instant.now();
     String expired =
-        token(
-            c -> {
-              c.put("iat", now.minusSeconds(600));
-              c.put("exp", now.minusSeconds(60));
-            });
+        token(c -> {
+          c.put("iat", now.minusSeconds(600));
+          c.put("exp", now.minusSeconds(60));
+        });
 
     assertThatThrownBy(() -> decoder.decode(expired)).isInstanceOf(JwtException.class);
   }
@@ -95,11 +94,10 @@ class ClinicalJwtDecodersTest {
   void toleratesTenSecondsOfClockSkew() {
     Instant now = Instant.now();
     String justExpired =
-        token(
-            c -> {
-              c.put("iat", now.minusSeconds(600));
-              c.put("exp", now.minusSeconds(10));
-            });
+        token(c -> {
+          c.put("iat", now.minusSeconds(600));
+          c.put("exp", now.minusSeconds(10));
+        });
 
     assertThat(decoder.decode(justExpired)).isNotNull();
   }

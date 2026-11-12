@@ -21,7 +21,8 @@ class AuthApiIT extends IntegrationTestBase {
   private UUID storedAlert(String patientId) {
     UUID id = UUID.randomUUID();
     sendAlert(
-        alertJson(id, patientId, "THRESHOLD", "HIGH", "HEART_RATE", "2026-11-11T20:15:00Z", "tachy"),
+        alertJson(
+            id, patientId, "THRESHOLD", "HIGH", "HEART_RATE", "2026-11-11T20:15:00Z", "tachy"),
         patientId,
         "c-auth");
     awaitAlertStored(id);
@@ -91,8 +92,7 @@ class AuthApiIT extends IntegrationTestBase {
     expired.put("iat", now.minusSeconds(7200));
     expired.put("exp", now.minusSeconds(3600));
     String forged =
-        TestTokens.hs256(
-            "forged-forged-forged-forged-forged-forged", TestTokens.validClaims(now));
+        TestTokens.hs256("forged-forged-forged-forged-forged-forged", TestTokens.validClaims(now));
 
     assertThat(get("/api/v1/patients", TestTokens.hs256(TestTokens.SECRET, expired)).statusCode())
         .isEqualTo(401);
@@ -119,16 +119,12 @@ class AuthApiIT extends IntegrationTestBase {
   @Test
   void devTokenEndpointIssuesTokensTheApiAcceptsInDev() throws Exception {
     HttpResponse<String> issued =
-        postJson(
-            "/api/v1/dev/token",
-            "{\"sub\":\"copilot\",\"roles\":[\"SERVICE\"]}",
-            null);
+        postJson("/api/v1/dev/token", "{\"sub\":\"copilot\",\"roles\":[\"SERVICE\"]}", null);
     String token = json.readTree(issued.body()).path("token").asString();
 
     assertThat(issued.statusCode()).isEqualTo(200);
     assertThat(get("/api/v1/patients", token).statusCode()).isEqualTo(200);
-    assertThat(
-            postJson("/api/v1/alerts/" + UUID.randomUUID() + "/ack", "{}", token).statusCode())
+    assertThat(postJson("/api/v1/alerts/" + UUID.randomUUID() + "/ack", "{}", token).statusCode())
         .isEqualTo(403);
   }
 }

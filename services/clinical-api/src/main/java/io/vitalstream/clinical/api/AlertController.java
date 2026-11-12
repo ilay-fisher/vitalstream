@@ -2,6 +2,7 @@ package io.vitalstream.clinical.api;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import io.vitalstream.clinical.application.AckActor;
 import io.vitalstream.clinical.application.AlertAckService;
 import io.vitalstream.clinical.application.AlertFilter;
 import io.vitalstream.clinical.application.AlertQueryService;
@@ -14,6 +15,8 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import java.util.UUID;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -62,13 +65,19 @@ public class AlertController {
   }
 
   /**
-   * Acknowledges an OPEN alert. Returns 409 when it was already acknowledged or changed
-   * concurrently, so two clinicians never both believe they own the alert.
+   * Acknowledges an OPEN alert on behalf of the token's user (CLINICIAN only). Returns 409 when it
+   * was already acknowledged or changed concurrently, so two clinicians never both believe they own
+   * the alert.
    */
   @PostMapping("/{id}/ack")
-  @Operation(summary = "Acknowledge an alert")
-  public AlertView acknowledge(@PathVariable UUID id, @Valid @RequestBody AckRequest request) {
-    return acks.acknowledge(id, request.by(), request.note());
+  @Operation(summary = "Acknowledge an alert as the authenticated clinician")
+  public AlertView acknowledge(
+      @PathVariable UUID id,
+      @Valid @RequestBody(required = false) AckRequest request,
+      @AuthenticationPrincipal Jwt token) {
+    String note = request == null ? null : request.note();
+    AckActor actor = AckActor.from(token.getSubject(), token.getClaimAsString("name"));
+    return acks.acknowledge(id, actor, note);
   }
 
   /**
