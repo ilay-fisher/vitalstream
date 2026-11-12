@@ -5,6 +5,7 @@ import static org.awaitility.Awaitility.await;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.GetResponse;
 import io.vitalstream.clinical.application.AlertRepository;
+import io.vitalstream.clinical.infrastructure.security.TestTokens;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -76,19 +77,36 @@ abstract class IntegrationTestBase {
     return "http://localhost:" + port + path;
   }
 
+  /** Token of the default caller: a clinician, so existing tests can read and acknowledge. */
+  protected static String clinicianToken() {
+    return TestTokens.valid("nurse.levi", "Nurse Levi", "CLINICIAN");
+  }
+
   protected HttpResponse<String> get(String path) throws Exception {
-    return http.send(
-        HttpRequest.newBuilder(URI.create(url(path))).GET().build(),
+    return get(path, clinicianToken());
+  }
+
+  /** GET with the given bearer token, or none at all when {@code token} is null. */
+  protected HttpResponse<String> get(String path, String token) throws Exception {
+    return http.send(authorized(HttpRequest.newBuilder(URI.create(url(path))), token).GET().build(),
         HttpResponse.BodyHandlers.ofString());
   }
 
   protected HttpResponse<String> postJson(String path, String body) throws Exception {
+    return postJson(path, body, clinicianToken());
+  }
+
+  protected HttpResponse<String> postJson(String path, String body, String token) throws Exception {
     return http.send(
-        HttpRequest.newBuilder(URI.create(url(path)))
+        authorized(HttpRequest.newBuilder(URI.create(url(path))), token)
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build(),
         HttpResponse.BodyHandlers.ofString());
+  }
+
+  protected static HttpRequest.Builder authorized(HttpRequest.Builder builder, String token) {
+    return token == null ? builder : builder.header("Authorization", "Bearer " + token);
   }
 
   /** AlertEvent JSON as the stream processor would produce it. */

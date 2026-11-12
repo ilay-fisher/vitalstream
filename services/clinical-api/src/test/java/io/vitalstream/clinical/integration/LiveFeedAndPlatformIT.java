@@ -36,6 +36,7 @@ class LiveFeedAndPlatformIT extends IntegrationTestBase {
     HttpResponse<java.io.InputStream> response =
         http.send(
             HttpRequest.newBuilder(URI.create(url("/api/v1/alerts/stream")))
+                .header("Authorization", "Bearer " + clinicianToken())
                 .header("Accept", "text/event-stream")
                 .GET()
                 .build(),
@@ -165,9 +166,9 @@ class LiveFeedAndPlatformIT extends IntegrationTestBase {
 
   @Test
   void actuatorOpenApiAndSwaggerAreServedWithBusinessMetrics() throws Exception {
-    String prometheus = get("/actuator/prometheus").body();
+    String prometheus = get("/actuator/prometheus", null).body();
 
-    assertThat(get("/actuator/health").statusCode()).isEqualTo(200);
+    assertThat(get("/actuator/health", null).statusCode()).isEqualTo(200);
     assertThat(prometheus)
         .contains("alerts_consumed_total")
         .contains("outbox_lag_seconds")
