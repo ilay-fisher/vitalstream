@@ -276,3 +276,17 @@ def test_n8n_service_gets_the_clinical_api_token_from_the_environment():
     assert env["CLINICAL_API_TOKEN"] == "${CLINICAL_API_TOKEN:-}"
     assert env["EXECUTIONS_DATA_SAVE_ON_SUCCESS"] == "none"
     assert env["EXECUTIONS_DATA_SAVE_ON_ERROR"] == "none"
+
+
+# newest 1.x release that a published n8n security advisory is fixed in (2026-10-28)
+N8N_MIN_VERSION = (1, 123, 89)
+
+
+def test_n8n_image_is_pinned_to_a_patched_exact_version_and_a_digest():
+    """A moving tag or an advisory-affected release must not come back unnoticed."""
+    image = load_yaml("infra/compose.yaml")["services"]["n8n"]["image"]
+
+    match = re.fullmatch(r"n8nio/n8n:(\d+)\.(\d+)\.(\d+)@sha256:[0-9a-f]{64}", image)
+
+    assert match, f"n8n image must be an exact tag plus digest, got {image}"
+    assert tuple(int(part) for part in match.groups()) >= N8N_MIN_VERSION
