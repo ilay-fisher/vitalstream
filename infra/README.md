@@ -19,7 +19,7 @@ Grafana provisioning. Source of truth for ports, topics and schemas is [docs/CON
 | prometheus | prom/prometheus:v2.55.1 | 9090 | |
 | grafana | grafana/grafana:11.3.1 | 3001 | `admin`/`admin` |
 | kibana (profile `tools`) | kibana:8.15.3 | 5601 | |
-| n8n (profile `tools`) | n8nio/n8n:1.64.3 | via proxy 5678 | behind Caddy basic auth (`caddy:2.8.4-alpine`) |
+| n8n (profile `tools`) | n8nio/n8n:1.123.94 (pinned by digest) | via proxy 5678 | behind Caddy basic auth (`caddy:2.8.4-alpine`) |
 
 Network `vitalstream`; in-network hostnames equal the service names. Every service has a healthcheck,
 a memory limit and (where stateful) a named volume.
