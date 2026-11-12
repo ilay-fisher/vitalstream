@@ -85,7 +85,7 @@ def up_recipe() -> str:
 def test_up_waits_only_on_non_init_services():
     """`--wait` treats exited one-shot init containers as failures, so they must be excluded."""
     recipe = up_recipe()
-    wait_lines = [line for line in recipe.splitlines() if "--wait" in line]
+    wait_lines = [line for line in recipe.splitlines() if "--wait" in line and "@#" not in line]
 
     assert wait_lines
     assert all("grep -v '^init-'" in line for line in wait_lines)
