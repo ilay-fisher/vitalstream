@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 
+from stream_processor.ewma import TrendHit
 from stream_processor.news2 import News2Result, news2_severity
 from stream_processor.threshold import evaluate_threshold
 from stream_processor.vitals import Metric, Severity
@@ -130,16 +131,18 @@ def make_threshold_alert(
 def make_trend_alert(
     patient_id: str,
     metric: Metric,
-    value: float,
-    z: float,
+    hit: TrendHit,
     window_start: datetime,
     window_end: datetime,
     detected_at: datetime,
 ) -> Alert:
-    """TREND_ZSCORE alert (always HIGH per CONTRACTS 3.3)."""
-    message = f"{metric.value} {value:.1f} deviates from EWMA trend (z={z:.2f})"
+    """TREND_ZSCORE alert (always MEDIUM per CONTRACTS 3.3); value = window mean, score = z."""
+    message = (
+        f"{metric.value} {hit.direction}: {hit.value:.1f} vs trend {hit.trend_mean:.1f} "
+        f"({hit.delta:+.1f}, z={hit.z:.1f}, {hit.breaches} of {hit.windows} min)"
+    )
     return _build(
-        patient_id, AlertType.TREND_ZSCORE, Severity.HIGH, metric, value, z, message,
+        patient_id, AlertType.TREND_ZSCORE, Severity.MEDIUM, metric, hit.value, hit.z, message,
         window_start, window_end, detected_at,
     )  # fmt: skip
 

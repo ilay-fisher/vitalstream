@@ -22,7 +22,8 @@ flowchart LR
     Q1 --> C1[(Cassandra<br/>vitals_raw)]
     Q1 --> S3[(S3 Parquet<br/>dt=/hour=)]
     Q1 --> R1[(Redis<br/>patient:id:latest)]
-    Q1 --> E[EWMA z-score<br/>state ewma:id:metric]
+    P --> Q3{{trend-detect query<br/>same windows, append mode<br/>closed windows only}}
+    Q3 --> E[EWMA over window means<br/>state ewma:id:metric<br/>TREND_ZSCORE]
     E --> A
     Q2 --> C2[(Cassandra<br/>vitals_by_minute)]
     Q2 --> D[THRESHOLD / NEWS2 /<br/>ML_ANOMALY]
@@ -30,8 +31,8 @@ flowchart LR
     A --> KA[(Kafka<br/>alerts.detected)]
 ```
 
-Two queries read the topic independently, each with its own checkpoint
-(`$CHECKPOINT_DIR/raw-sink`, `$CHECKPOINT_DIR/window-detect`). Heavy lifting (parsing,
+Three queries read the topic independently, each with its own checkpoint
+(`$CHECKPOINT_DIR/raw-sink`, `window-detect`, `trend-detect`). Heavy lifting (parsing,
 windowed aggregation, unpivot, Cassandra/Parquet writes) stays in Spark; the detectors are
 pure Python modules (`threshold`, `news2`, `ewma`, `anomaly`, `detection`, `alerts`) applied to
 the small per-batch result on the driver, which keeps every rule unit-testable without Spark.
@@ -64,17 +65,50 @@ the window are rounded to chart resolution (integers, temperature to 0.1, half-u
 `total = RR + SpO2 + SBP + HR + Temp`. Total >=7 -> CRITICAL, 5-6 -> HIGH, otherwise any single
 parameter scoring 3 -> MEDIUM. A window missing any of the five parameters is not scored.
 
-**TREND_ZSCORE.** Per patient+metric EWMA over raw readings (alpha = 0.1), incremental form
-(Finch): with `d = x - mean`, `incr = alpha*d`:
+**TREND_ZSCORE (v2).** Scores the **closed 1-minute window mean**, never raw samples. The
+`trend-detect` query re-aggregates the same windows in *append* mode, so a window reaches the
+detector exactly once, after the 30 s watermark has closed it (an update-mode window would be
+scored while still partial).
+
+Why not raw samples (v1): at 1 Hz that was ~60 z-tests per metric per minute. Even Gaussian noise
+crosses |z| >= 3 several times an hour, and one hit raised a HIGH alert: 66 false HIGH alerts on 16
+stable patients in the live stack. v2 removes the multiple-testing problem in three steps:
+
+1. **Window means** average the 1 Hz noise away (sd 3 bpm of raw HR becomes ~0.4 bpm per minute).
+2. **Clinical-delta gate.** A window is a *breach* only if `|z| >= 3` **and** `|mean - trend|` is at
+   least the metric's minimum clinical delta: HR 10 /min, RR 4 /min, SpO2 3 %, SBP 15 mm[Hg],
+   DBP 10 mm[Hg], Temp 0.5 Cel. A statistically odd but clinically meaningless shift stays silent.
+3. **Persistence.** An alert needs >= 3 of the last 5 windows (this one included) to be breaches
+   in the *same direction*. A one-minute artefact (probe slip, movement) cannot alert.
+
+EWMA over window means with `alpha = 0.2`, incremental form (Finch), `d = x - mean`, `incr = alpha*d`:
 
 ```
 mean' = mean + incr
-var'  = (1 - alpha) * (var + d * incr)
-z     = (x - mean) / max(sqrt(var), 0.02*|mean|, 0.1)      # scored against the *prior* state
+var'  = (1 - alpha) * (var + d * incr)               # skipped when |z| >= 3, see below
+z     = (x - mean) / max(sqrt(var), 0.02*|mean|, 0.1)  # scored against the *prior* state
 ```
 
-`|z| >= 3` after a 10-sample warm-up -> HIGH. The std floor stops a flat signal from making the
-first wiggle infinitely anomalous. One alert per (patient, metric, minute): the largest `|z|`.
+No breach can occur in the first 5 windows (warm-up). Severity is **MEDIUM** (a heads-up inside
+the normal range; THRESHOLD and NEWS2 carry escalation). `score` = z, `value` = window mean,
+message e.g. `HEART_RATE rising: 104.2 vs trend 88.9 (+15.3, z=4.1, 3 of 5 min)`. Alert ids are
+unchanged (`patientId|type|metric|windowStart`).
+
+State `ewma:{patientId}:{metric}` = `mean,var,n,ts,hist`. `ts` is the last applied windowStart, a
+window at or before it is ignored (replay-safe). `hist` is the outcome of the last 5 windows
+(`+` breach up, `-` breach down, `.` none). A v1 hash (no `hist`, raw-sample statistics) is
+discarded and the detector re-warms for 5 windows.
+
+*Deviation from a literal reading of the contract:* windows with `|z| >= 3` move the mean but are
+not folded into the variance. Folded in, a real shift inflates the std within one or two windows
+(+20 bpm step against std 1.5: z = 13, then 2 against the inflated std 8), so z never reaches 3 three times and the detector
+cannot alert on anything but a sharp spike-and-hold. Measured on synthetic series (HR 75, sd 3 at
+1 Hz): a +3 bpm/min ramp alerts 7 min after onset, a +20 bpm step alerts on its third window, 30 min of stable
+noise on 40 patients gives 0 alerts (v1: 29 per patient-hour on the same data).
+
+Known limits: a ramp slower than ~3 bpm/min never exceeds the clinical delta against an EWMA that
+follows it (the lag settles at `slope / alpha`, so +2/min tops out at exactly 10 bpm); the 2 %
+relative std floor makes SpO2 need a ~6 point departure for z >= 3.
 
 **ML_ANOMALY.** Feature vector = per-window means of the 6 metrics, standardised
 (`(x - mu) / sigma` fitted on training data). Spark ML `KMeans` is trained for k = 2..6 on 5000
@@ -97,7 +131,7 @@ replayed with the same rows after a crash). Every sink is made effectively-once:
 | Cassandra `vitals_raw` | upsert on the full primary key (`event_id` included) |
 | Cassandra `vitals_by_minute` | upsert on (patient, metric, day, window_start); update mode re-emits the full current aggregate |
 | Redis `patient:{id}:latest` | a metric is only overwritten by a strictly newer `observedAt` |
-| Redis `ewma:*` | state stores `ts` of the last sample; samples with `ts <= last` are skipped, so a replayed batch folds nothing in twice |
+| Redis `ewma:*` | state stores `ts` of the last applied windowStart; windows with `ts <= last` are skipped, so a replayed batch folds nothing in twice |
 | Kafka `alerts.detected` | deterministic `alertId`; an `alert:emitted:{alertId}` ledger (TTL 15 min, stores severity rank) suppresses re-publication unless severity escalated. Order is publish -> record (EWMA state saved after publish): a crash yields a duplicate with the same `alertId`, never a lost alert |
 | S3 Parquet | **at-least-once**: a replayed batch appends duplicate rows. Rows carry `eventId`, readers dedupe on it |
 
@@ -167,8 +201,10 @@ CONTRACTS section 5 DDL used by tests. Locally the connector jars are resolved t
   that feeds +31 s, +5 min and +1 h events and shows another patient's window is still aggregated
   and alerted, plus a control run without the guard where it is not.
 
-* Per-batch detection runs on the driver (collects only the batch's windows/readings). Fine for
+* Per-batch detection runs on the driver (collects only the batch's windows). Fine for
   the project's scale; for much higher volume move EWMA to `applyInPandasWithState`.
 * `update` output mode emits alerts as soon as a window crosses a rule instead of waiting for
   the watermark; the ledger prevents repeat emissions.
+* TREND_ZSCORE alerts arrive ~30 s after the window closes (watermark), later than the update-mode
+  detectors; that is the price of scoring complete windows only.
 * EWMA is not reset on long gaps; a patient re-admitted after >24 h starts fresh (Redis TTL).

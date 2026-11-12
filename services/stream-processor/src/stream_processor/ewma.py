@@ -1,87 +1,89 @@
-"""Exponentially weighted mean/variance and the TREND_ZSCORE detector.
+"""EWMA over 1-minute window means and the TREND_ZSCORE v2 decision (CONTRACTS 3.3 / 5).
 
-State per patient+metric is three numbers plus the timestamp of the last sample folded in. The
-timestamp makes `scan_series` idempotent: when Spark replays a micro-batch after a failure the
-samples at or before `last_ts` are skipped instead of being folded in twice.
+Why windows and persistence: scoring every 1 Hz sample ran ~60 tests per metric per minute, so
+noise alone crossed |z| >= 3 several times an hour. A closed window mean averages that noise away,
+the clinical-delta gate drops statistically significant but clinically meaningless shifts, and
+requiring 3 of the last 5 windows to breach in the same direction drops one-minute artefacts.
+
+State per patient+metric: EW mean/variance over window means, the number of windows folded in, the
+start of the last applied window (`last_ts`, makes replays idempotent) and `hist`, the outcome of
+the last windows as `+` (breach up), `-` (breach down) or `.` (none), newest last.
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class EwmaConfig:
-    """Detector parameters (CONTRACTS 3.3: alpha 0.1, |z| >= 3)."""
+    """Detector parameters (CONTRACTS 3.3: alpha 0.2, |z| >= 3, warm-up 5, 3 of 5 windows)."""
 
-    alpha: float = 0.1
+    alpha: float = 0.2
     z_threshold: float = 3.0
-    min_samples: int = 10
+    warmup_windows: int = 5
+    persistence_windows: int = 5
+    persistence_required: int = 3
     min_rel_std: float = 0.02
     min_abs_std: float = 0.1
 
 
 @dataclass(frozen=True)
 class EwmaState:
-    """Mean, variance, sample count and last folded-in timestamp (epoch milliseconds)."""
+    """Window-mean EWMA state; `last_ts` is the last applied windowStart (epoch milliseconds)."""
 
     mean: float
     var: float
     n: int
     last_ts: int
+    hist: str
 
     def to_hash(self) -> dict[str, str]:
-        """Serialise for a Redis hash (`mean`, `var`, `n` per CONTRACTS plus `ts`)."""
+        """Serialise for the Redis hash `mean,var,n,ts,hist` (CONTRACTS 5)."""
         return {
             "mean": repr(self.mean),
             "var": repr(self.var),
             "n": str(self.n),
             "ts": str(self.last_ts),
+            "hist": self.hist,
         }
 
     @classmethod
     def from_hash(cls, data: Mapping[str, str]) -> EwmaState | None:
-        """Parse a Redis hash; None when the key does not exist yet."""
-        if not data:
+        """Parse a Redis hash; None when absent or a v1 raw-sample hash (no `hist`) to reset."""
+        if not data or "hist" not in data:
             return None
         return cls(
             mean=float(data["mean"]),
             var=float(data["var"]),
             n=int(data["n"]),
-            last_ts=int(data.get("ts", 0)),
+            last_ts=int(data["ts"]),
+            hist=data["hist"],
         )
 
 
 @dataclass(frozen=True)
 class TrendHit:
-    """A sample whose z-score crossed the threshold."""
+    """A window that completed a persistent trend: what to say about it in the alert."""
 
-    ts: int
     value: float
+    trend_mean: float
     z: float
+    delta: float
+    breaches: int
+    windows: int = 5
 
+    @property
+    def rising(self) -> bool:
+        """True when the window mean is above the trend."""
+        return self.delta > 0
 
-def update(state: EwmaState | None, x: float, ts: int, alpha: float) -> EwmaState:
-    """Fold one sample into the state using the incremental EW mean/variance recursion.
-
-    With diff = x - mean and incr = alpha * diff:
-        mean' = mean + incr
-        var'  = (1 - alpha) * (var + diff * incr)
-    (Finch, "Incremental calculation of weighted mean and variance"). The first sample seeds the
-    mean with zero variance.
-    """
-    if state is None:
-        return EwmaState(mean=x, var=0.0, n=1, last_ts=ts)
-    diff = x - state.mean
-    incr = alpha * diff
-    return EwmaState(
-        mean=state.mean + incr,
-        var=(1.0 - alpha) * (state.var + diff * incr),
-        n=state.n + 1,
-        last_ts=ts,
-    )
+    @property
+    def direction(self) -> str:
+        """`rising` or `falling`."""
+        return "rising" if self.rising else "falling"
 
 
 def z_score(state: EwmaState | None, x: float, cfg: EwmaConfig) -> float | None:
@@ -90,29 +92,67 @@ def z_score(state: EwmaState | None, x: float, cfg: EwmaConfig) -> float | None:
     The standard deviation is floored at max(min_rel_std * |mean|, min_abs_std): a perfectly flat
     signal has zero variance, which would make the first tiny wiggle look infinitely anomalous.
     """
-    if state is None or state.n < cfg.min_samples:
+    if state is None or state.n < cfg.warmup_windows:
         return None
     std = max(math.sqrt(max(state.var, 0.0)), cfg.min_rel_std * abs(state.mean), cfg.min_abs_std)
     return (x - state.mean) / std
 
 
-def scan_series(
+def score_window(
     state: EwmaState | None,
-    samples: Iterable[tuple[int, float]],
+    window_mean: float,
+    window_ts: int,
+    min_delta: float,
     cfg: EwmaConfig,
-) -> tuple[EwmaState | None, list[TrendHit]]:
-    """Process (timestamp, value) samples in time order, returning new state and threshold hits.
+) -> tuple[EwmaState, TrendHit | None]:
+    """Score one closed window against the state *before* it, then fold it in.
 
-    Samples with a timestamp at or before `state.last_ts` are ignored (replay / out-of-order
-    protection). Each remaining sample is scored against the state *before* it is folded in, so an
-    outlier is judged against history rather than against itself.
+    A window at or before `state.last_ts` is a replay and changes nothing. A window is a breach
+    when |z| >= z_threshold and |mean - trend| >= min_delta; a hit needs `persistence_required`
+    breaches in the same direction among the last `persistence_windows` (this one included).
+
+    Windows with |z| >= z_threshold move the mean but not the variance. Folding a real shift into
+    the variance inflates the std within one or two windows, so z falls back under the threshold
+    and the persistence rule could never be met (a +20 bpm step yields at most two breaches).
     """
-    hits: list[TrendHit] = []
-    for ts, value in sorted(samples):
-        if state is not None and ts <= state.last_ts:
-            continue
-        z = z_score(state, value, cfg)
-        if z is not None and abs(z) >= cfg.z_threshold:
-            hits.append(TrendHit(ts=ts, value=value, z=z))
-        state = update(state, value, ts, cfg.alpha)
-    return state, hits
+    if state is None:
+        return EwmaState(mean=window_mean, var=0.0, n=1, last_ts=window_ts, hist="."), None
+    if window_ts <= state.last_ts:
+        return state, None
+    z = z_score(state, window_mean, cfg)
+    delta = window_mean - state.mean
+    outcome = "."
+    if z is not None and abs(z) >= cfg.z_threshold and abs(delta) >= min_delta:
+        outcome = "+" if z > 0 else "-"
+    hist = (state.hist + outcome)[-cfg.persistence_windows :]
+    hit = None
+    if z is not None and outcome != "." and hist.count(outcome) >= cfg.persistence_required:
+        hit = TrendHit(
+            value=window_mean,
+            trend_mean=state.mean,
+            z=z,
+            delta=delta,
+            breaches=hist.count(outcome),
+            windows=cfg.persistence_windows,
+        )
+    return _fold(state, window_mean, window_ts, hist, z, cfg), hit
+
+
+def _fold(
+    state: EwmaState,
+    x: float,
+    ts: int,
+    hist: str,
+    z: float | None,
+    cfg: EwmaConfig,
+) -> EwmaState:
+    """Incremental EW mean/variance (Finch); the variance skips |z| >= z_threshold windows.
+
+    With diff = x - mean and incr = alpha * diff:  mean' = mean + incr,
+    var' = (1 - alpha) * (var + diff * incr).
+    """
+    diff = x - state.mean
+    incr = cfg.alpha * diff
+    outlier = z is not None and abs(z) >= cfg.z_threshold
+    var = state.var if outlier else (1.0 - cfg.alpha) * (state.var + diff * incr)
+    return EwmaState(mean=state.mean + incr, var=var, n=state.n + 1, last_ts=ts, hist=hist)

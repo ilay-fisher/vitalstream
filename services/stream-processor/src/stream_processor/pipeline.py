@@ -1,11 +1,12 @@
 """Streaming queries and their foreachBatch handlers.
 
-Two queries read `vitals.raw`:
+Three queries read `vitals.raw`:
 
-* ``raw-sink``: every valid event -> Cassandra `vitals_raw`, Parquet archive, Redis latest hash,
-  EWMA state + TREND_ZSCORE alerts.
+* ``raw-sink``: every valid event -> Cassandra `vitals_raw`, Parquet archive, Redis latest hash.
 * ``window-detect``: 1-minute tumbling windows (watermark 30 s, update mode) -> Cassandra
   `vitals_by_minute`, THRESHOLD / NEWS2 / ML_ANOMALY alerts.
+* ``trend-detect``: the same windows in append mode, i.e. each emitted exactly once when it is
+  closed by the watermark -> EWMA state over window means + TREND_ZSCORE alerts.
 
 Every sink is idempotent under replay of the same micro-batch (see README).
 """
@@ -24,7 +25,7 @@ from pyspark.sql.types import ArrayType, BinaryType, StringType, StructField, St
 from stream_processor.alerts import Alert
 from stream_processor.anomaly import AnomalyModel
 from stream_processor.config import Settings
-from stream_processor.detection import WindowSnapshot, detect_trend_alerts, detect_window_alerts
+from stream_processor.detection import WindowSnapshot, detect_trend_alert, detect_window_alerts
 from stream_processor.ewma import EwmaConfig, EwmaState
 from stream_processor.logging_setup import bind_correlation_id, get_logger
 from stream_processor.metrics import Metrics
@@ -147,7 +148,6 @@ class RawBatchHandler:
     def __init__(self, spark: SparkSession, deps: Deps) -> None:
         self._deps = deps
         self._publisher = AlertPublisher(spark, deps)
-        self._ewma = EwmaStore(deps.redis)
         self._latest = LatestStore(deps.redis)
 
     def __call__(self, batch: DataFrame, batch_id: int) -> None:
@@ -195,43 +195,23 @@ class RawBatchHandler:
                 "correlationId",
                 (F.col("observedAt").cast("double") * 1000).cast("long").alias("ts"),
             ).collect()
-            self._update_redis_and_detect(rows, batch_id)
+            self._update_latest(rows)
             deps.metrics.events_processed.inc(count)
             deps.metrics.batches.labels(query="raw-sink").inc()
             log.info("raw batch written", batchId=batch_id, events=count)
         finally:
             batch.unpersist()
 
-    def _update_redis_and_detect(self, rows: list[Row], batch_id: int) -> None:
+    def _update_latest(self, rows: list[Row]) -> None:
         latest: dict[tuple[str, Metric], LatestReading] = {}
-        series: dict[tuple[str, Metric], list[tuple[int, float]]] = defaultdict(list)
-        corr: dict[tuple[str, Metric], str | None] = {}
         for r in rows:
             key = (r.patientId, Metric(r.metric))
-            series[key].append((r.ts, r.value))
             current = latest.get(key)
             if current is None or r.ts >= current.observed_at_ms:
                 latest[key] = LatestReading(
                     r.patientId, key[1], r.value, r.unit, r.ts, _iso_ms(r.ts)
                 )
-                corr[key] = r.correlationId
         self._latest.update(latest.values())
-
-        states = self._ewma.load_many(series.keys())
-        new_states: dict[tuple[str, Metric], EwmaState] = {}
-        alerts: list[tuple[Alert, str | None]] = []
-        now = _utcnow()
-        for key, samples in series.items():
-            state, trend_alerts = detect_trend_alerts(
-                key[0], key[1], states.get(key), samples, self._deps.ewma_cfg, now
-            )
-            if state is not None and state != states.get(key):
-                new_states[key] = state
-            alerts.extend((a, corr.get(key)) for a in trend_alerts)
-        # Publish before persisting EWMA state: a crash in between replays the batch, which
-        # re-derives the same alertIds (deduplicated), whereas the reverse order could lose alerts.
-        self._publisher.publish(alerts)
-        self._ewma.save_many(new_states)
 
 
 class WindowBatchHandler:
@@ -265,6 +245,58 @@ class WindowBatchHandler:
             )
         finally:
             batch.unpersist()
+
+
+class TrendBatchHandler:
+    """foreachBatch handler for the closed-window query (TREND_ZSCORE v2)."""
+
+    def __init__(self, spark: SparkSession, deps: Deps) -> None:
+        self._deps = deps
+        self._publisher = AlertPublisher(spark, deps)
+        self._ewma = EwmaStore(deps.redis)
+
+    def __call__(self, batch: DataFrame, batch_id: int) -> None:
+        """Fold each closed window mean into its EWMA state, oldest first, and alert on trends."""
+        deps = self._deps
+        rows = sorted(batch.collect(), key=lambda row: row["windowStart"])
+        if not rows:
+            return
+        windows: dict[tuple[str, Metric], list[Row]] = defaultdict(list)
+        for row in rows:
+            for metric in Metric:
+                if row[f"{metric.value}_avg"] is not None:
+                    windows[(row["patientId"], metric)].append(row)
+        states = self._ewma.load_many(windows.keys())
+        new_states: dict[tuple[str, Metric], EwmaState] = {}
+        alerts: list[tuple[Alert, str | None]] = []
+        now = _utcnow()
+        for key, key_rows in windows.items():
+            state = states.get(key)
+            for row in key_rows:
+                start = row["windowStart"].replace(tzinfo=timezone.utc)
+                end = row["windowEnd"].replace(tzinfo=timezone.utc)
+                state, alert = detect_trend_alert(
+                    key[0],
+                    key[1],
+                    state,
+                    start,
+                    end,
+                    row[f"{key[1].value}_avg"],
+                    deps.ewma_cfg,
+                    now,
+                )
+                if alert is not None:
+                    alerts.append((alert, row["lastCorrelationId"]))
+            if state is not None and state != states.get(key):
+                new_states[key] = state
+        # Publish before persisting EWMA state: a crash in between replays the batch, which
+        # re-derives the same alertIds (deduplicated), whereas the reverse order could lose alerts.
+        sent = self._publisher.publish(alerts)
+        self._ewma.save_many(new_states)
+        deps.metrics.batches.labels(query="trend-detect").inc()
+        get_logger().info(
+            "trend batch processed", batchId=batch_id, windows=len(rows), alertsSent=sent
+        )
 
 
 def _snapshot(row: Row) -> WindowSnapshot:
@@ -321,4 +353,15 @@ def start_queries(spark: SparkSession, deps: Deps) -> list[StreamingQuery]:
         .trigger(**_trigger(settings))
         .start()
     )
-    return [raw_query, window_query]
+    closed_windows = window_aggregate(
+        valid_only(events), settings.window_duration, settings.watermark
+    )
+    trend_query = (
+        closed_windows.writeStream.queryName("trend-detect")
+        .outputMode("append")
+        .foreachBatch(TrendBatchHandler(spark, deps))
+        .option("checkpointLocation", f"{base}/trend-detect")
+        .trigger(**_trigger(settings))
+        .start()
+    )
+    return [raw_query, window_query, trend_query]

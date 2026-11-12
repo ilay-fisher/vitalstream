@@ -177,6 +177,8 @@ def test_pipeline_end_to_end(infra: dict[str, Any], tmp_path: Path) -> None:
     }
     assert json.loads(latest["HEART_RATE"])["unit"] == "/min"
     assert r.hget("ewma:P-0002:HEART_RATE", "n") is not None
+    assert set(r.hget("ewma:P-0002:HEART_RATE", "hist")) <= set("+-.")
+    assert r.hget("ewma:P-0001:HEART_RATE", "hist") is not None
 
     alerts = _consume_alerts(infra["kafka"])
     assert alerts, "expected alerts for the deteriorating patient"
@@ -187,8 +189,11 @@ def test_pipeline_end_to_end(infra: dict[str, Any], tmp_path: Path) -> None:
         assert ("P-0002", expected) in types
     stable = {a["type"] for a, _, _ in alerts if a["patientId"] == "P-0001"}
     assert not stable & {"THRESHOLD", "NEWS2"}
-    # A 3-sigma rule fires on ~0.3 % of Gaussian noise by design, so the stable patient may see
-    # a stray TREND_ZSCORE alert; only THRESHOLD and NEWS2 must stay silent for it.
+    # TREND_ZSCORE scores closed window means and needs 3 persistent breaches: noise alone must
+    # never raise it for the stable patient.
+    assert "TREND_ZSCORE" not in stable
+    trend = [a for a, _, _ in alerts if a["type"] == "TREND_ZSCORE"]
+    assert trend and all(a["severity"] == "MEDIUM" and a["patientId"] == "P-0002" for a in trend)
     for alert, headers, key in alerts:
         assert key == alert["patientId"]
         assert headers["schemaVersion"] == "1"

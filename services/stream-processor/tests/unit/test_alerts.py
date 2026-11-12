@@ -14,6 +14,7 @@ from stream_processor.alerts import (
     make_threshold_alert,
     make_trend_alert,
 )
+from stream_processor.ewma import TrendHit
 from stream_processor.news2 import compute_news2
 from stream_processor.vitals import Metric, Severity
 
@@ -73,12 +74,26 @@ def test_threshold_alert_critical() -> None:
     assert alert.severity is Severity.CRITICAL
 
 
-def test_trend_alert_is_high_with_zscore() -> None:
-    alert = make_trend_alert("P-0001", Metric.HEART_RATE, 120.0, 4.2, WS, WE, NOW)
-    assert alert.severity is Severity.HIGH
+def test_trend_alert_is_medium_with_zscore_and_window_mean() -> None:
+    hit = TrendHit(value=104.2, trend_mean=88.9, z=4.1, delta=15.3, breaches=3)
+    alert = make_trend_alert("P-0001", Metric.HEART_RATE, hit, WS, WE, NOW)
+    assert alert.severity is Severity.MEDIUM
     assert alert.type is AlertType.TREND_ZSCORE
-    assert alert.score == 4.2
-    assert alert.value == 120.0
+    assert alert.score == 4.1
+    assert alert.value == 104.2
+    assert alert.message == "HEART_RATE rising: 104.2 vs trend 88.9 (+15.3, z=4.1, 3 of 5 min)"
+
+
+def test_trend_alert_message_for_falling_metric() -> None:
+    hit = TrendHit(value=91.0, trend_mean=97.4, z=-5.26, delta=-6.4, breaches=4)
+    alert = make_trend_alert("P-0001", Metric.SPO2, hit, WS, WE, NOW)
+    assert alert.message == "SPO2 falling: 91.0 vs trend 97.4 (-6.4, z=-5.3, 4 of 5 min)"
+
+
+def test_trend_alert_id_scheme_is_unchanged() -> None:
+    hit = TrendHit(value=104.2, trend_mean=88.9, z=4.1, delta=15.3, breaches=3)
+    alert = make_trend_alert("P-0001", Metric.HEART_RATE, hit, WS, WE, NOW)
+    assert alert.alert_id == alert_id("P-0001", AlertType.TREND_ZSCORE, Metric.HEART_RATE, WS)
 
 
 def test_news2_alert_none_below_thresholds() -> None:

@@ -4,11 +4,8 @@ from stream_processor.alerts import AlertType
 from stream_processor.anomaly import AnomalyModel, Standardizer
 from stream_processor.detection import (
     WindowSnapshot,
-    detect_trend_alerts,
     detect_window_alerts,
-    window_bounds,
 )
-from stream_processor.ewma import EwmaConfig
 from stream_processor.vitals import Metric, Severity
 
 WS = datetime(2026, 11, 11, 20, 15, 0, tzinfo=timezone.utc)
@@ -45,11 +42,6 @@ def _model(threshold: float = 3.0) -> AnomalyModel:
         silhouette=0.0,
         training_rows=1,
     )
-
-
-def test_window_bounds_floors_to_minute() -> None:
-    ts = int(datetime(2026, 11, 11, 20, 15, 42, 500_000, tzinfo=timezone.utc).timestamp() * 1000)
-    assert window_bounds(ts, 60) == (WS, WE)
 
 
 def test_healthy_window_raises_nothing() -> None:
@@ -115,32 +107,3 @@ def test_alert_windows_come_from_snapshot() -> None:
     avg = {**NORMAL, Metric.HEART_RATE: 105.0}
     (alert,) = list(detect_window_alerts(snapshot(avg), None, NOW))
     assert (alert.window_start, alert.window_end, alert.detected_at) == (WS, WE, NOW)
-
-
-CFG = EwmaConfig()
-
-
-def _ms(minute: int, second: int = 0) -> int:
-    return int(datetime(2026, 11, 11, 20, minute, second, tzinfo=timezone.utc).timestamp() * 1000)
-
-
-def test_trend_alert_one_per_window_with_largest_z() -> None:
-    warmup = [(_ms(0, s), 72.0 + (s % 3) * 0.4) for s in range(30)]
-    state, alerts = detect_trend_alerts("P-0001", Metric.HEART_RATE, None, warmup, CFG, NOW)
-    assert alerts == []
-    spikes = [(_ms(1, 5), 110.0), (_ms(1, 6), 140.0), (_ms(1, 7), 72.0)]
-    state, alerts = detect_trend_alerts("P-0001", Metric.HEART_RATE, state, spikes, CFG, NOW)
-    assert len(alerts) == 1
-    alert = alerts[0]
-    assert alert.type is AlertType.TREND_ZSCORE and alert.severity is Severity.HIGH
-    assert alert.window_start == datetime(2026, 11, 11, 20, 1, tzinfo=timezone.utc)
-    assert alert.value in (110.0, 140.0)
-    assert alert.score is not None and abs(alert.score) >= 3.0
-
-
-def test_trend_alerts_in_different_windows_are_separate() -> None:
-    warmup = [(_ms(0, s), 72.0 + (s % 3) * 0.4) for s in range(30)]
-    state, _ = detect_trend_alerts("P-0001", Metric.HEART_RATE, None, warmup, CFG, NOW)
-    spikes = [(_ms(1, 5), 150.0), (_ms(2, 5), 190.0)]
-    _, alerts = detect_trend_alerts("P-0001", Metric.HEART_RATE, state, spikes, CFG, NOW)
-    assert len({a.window_start for a in alerts}) == len(alerts) >= 1

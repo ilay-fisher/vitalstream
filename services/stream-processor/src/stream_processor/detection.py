@@ -5,9 +5,9 @@ Nothing here touches Spark, Redis or Kafka, so the whole detection policy is uni
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from stream_processor.alerts import (
     Alert,
@@ -17,9 +17,9 @@ from stream_processor.alerts import (
     make_trend_alert,
 )
 from stream_processor.anomaly import AnomalyModel, feature_vector
-from stream_processor.ewma import EwmaConfig, EwmaState, scan_series
+from stream_processor.ewma import EwmaConfig, EwmaState, score_window
 from stream_processor.news2 import compute_news2
-from stream_processor.vitals import Metric
+from stream_processor.vitals import MIN_TREND_DELTA, Metric
 
 
 @dataclass(frozen=True)
@@ -32,14 +32,6 @@ class WindowSnapshot:
     avg: Mapping[Metric, float | None]
     last: Mapping[Metric, float | None]
     correlation_id: str | None
-
-
-def window_bounds(ts_ms: int, window_seconds: int) -> tuple[datetime, datetime]:
-    """Return the tumbling window [start, end) that contains an epoch-millisecond timestamp."""
-    seconds = ts_ms // 1000
-    start_epoch = seconds - seconds % window_seconds
-    start = datetime.fromtimestamp(start_epoch, tz=timezone.utc)
-    return start, start + timedelta(seconds=window_seconds)
 
 
 def detect_window_alerts(
@@ -97,29 +89,23 @@ def _required(value: float | None) -> float:
     return value
 
 
-def detect_trend_alerts(
+def detect_trend_alert(
     patient_id: str,
     metric: Metric,
     state: EwmaState | None,
-    samples: Sequence[tuple[int, float]],
+    window_start: datetime,
+    window_end: datetime,
+    window_mean: float,
     cfg: EwmaConfig,
     now: datetime,
-    window_seconds: int = 60,
-) -> tuple[EwmaState | None, list[Alert]]:
-    """Advance the EWMA state over `samples` and raise one TREND_ZSCORE alert per window.
+) -> tuple[EwmaState, Alert | None]:
+    """Score one closed window mean for TREND_ZSCORE and return the new state and any alert.
 
-    When several samples in the same window trip the threshold only the one with the largest
-    |z| is reported, matching the one-alert-per-(patient, type, metric, window) alertId scheme.
+    Windows must be fed in order; a window already applied (replay) leaves the state untouched and
+    raises nothing, which keeps the Redis state and the alert stream idempotent.
     """
-    new_state, hits = scan_series(state, samples, cfg)
-    worst_per_window: dict[datetime, tuple[float, float, datetime]] = {}
-    for hit in hits:
-        start, end = window_bounds(hit.ts, window_seconds)
-        current = worst_per_window.get(start)
-        if current is None or abs(hit.z) > abs(current[0]):
-            worst_per_window[start] = (hit.z, hit.value, end)
-    alerts = [
-        make_trend_alert(patient_id, metric, value, z, start, end, now)
-        for start, (z, value, end) in sorted(worst_per_window.items())
-    ]
-    return new_state, alerts
+    window_ts = int(window_start.timestamp() * 1000)
+    new_state, hit = score_window(state, window_mean, window_ts, MIN_TREND_DELTA[metric], cfg)
+    if hit is None:
+        return new_state, None
+    return new_state, make_trend_alert(patient_id, metric, hit, window_start, window_end, now)
