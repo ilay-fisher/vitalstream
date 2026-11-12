@@ -100,7 +100,7 @@ Retention: `vitals.raw` 7 days, `alerts.*` 30 days. Replication factor 1 locally
 
 | Field | Type | Rules |
 |---|---|---|
-| alertId | UUID | deterministic: `uuid5(NAMESPACE_URL, "patientId|type|metric|windowStart")` (RFC 4122 URL namespace `6ba7b811-9dad-11d1-80b4-00c04fd430c8`; metric = empty string when null; windowStart formatted `yyyy-MM-ddTHH:mm:ssZ` UTC, no millis). Lets consumers dedupe replays and recompute ids |
+| alertId | UUID | **detection id** (one per patient, type, metric and window; clinical-api groups detections into episodes, §3.4, whose id is a different UUID). Deterministic: `uuid5(NAMESPACE_URL, "patientId|type|metric|windowStart")` (RFC 4122 URL namespace `6ba7b811-9dad-11d1-80b4-00c04fd430c8`; metric = empty string when null; windowStart formatted `yyyy-MM-ddTHH:mm:ssZ` UTC, no millis). Lets consumers dedupe replays and recompute ids |
 | type | enum | `THRESHOLD`, `TREND_ZSCORE`, `NEWS2`, `ML_ANOMALY` |
 | severity | enum | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
 | metric / value | nullable | set for THRESHOLD and TREND_ZSCORE |
@@ -109,10 +109,27 @@ Retention: `vitals.raw` 7 days, `alerts.*` 30 days. Replication factor 1 locally
 ### 3.3 Detection rules (stream-processor)
 
 - **THRESHOLD**: 1-min window avg outside normal range → MEDIUM; outside `valid range` midpoint-to-edge critical bands (HR <40 or >130, SpO2 <90, RR <8 or >25, SBP <90, Temp <35 or >39.1) → CRITICAL.
-- **TREND_ZSCORE**: per patient+metric EWMA mean/variance (alpha 0.1, state kept across micro-batches); |z| ≥ 3 → HIGH.
+- **TREND_ZSCORE** (v2, alarm-fatigue fix): scored on the **closed 1-min window mean** of a metric, never on raw samples (raw 1 Hz scoring ran ~60 tests per metric per minute and alerted stable patients by chance). Per patient+metric EWMA over window means: alpha 0.2, warm-up 5 windows (no hits before), std floor as today. A window is a *breach* when |z| ≥ 3 **and** |window mean − EWMA mean| ≥ the metric's minimum clinical delta: HEART_RATE 10 /min, RESP_RATE 4 /min, SPO2 3 %, SYSTOLIC_BP 15 mm[Hg], DIASTOLIC_BP 10 mm[Hg], TEMPERATURE 0.5 Cel. An alert is emitted for a window only when at least 3 of the last 5 windows (this one included) are breaches **in the same direction** (persistence). The window is scored against the state before it, then folded into the state. Severity **MEDIUM** (a trend inside the normal range is a heads-up; NEWS2 and THRESHOLD carry escalation). `score` = z of this window, `value` = window mean, message names direction and delta, e.g. `HEART_RATE rising: 104.2 vs trend 88.9 (+15.3, z=4.1, 3 of 5 min)`.
 - **NEWS2** (Royal College of Physicians, room-air scale 1, consciousness assumed Alert): computed per patient per 1-min window from latest RR, SpO2, SBP, HR, Temp. Total 5–6 → HIGH, ≥7 → CRITICAL, any single parameter scoring 3 → MEDIUM.
 - **ML_ANOMALY**: Spark ML KMeans (k chosen by silhouette) trained offline on normal simulated windows; feature vector = standardized per-window means of the 6 metrics; distance to nearest centroid above the 99th percentile of training distances → MEDIUM.
 - Windows: tumbling 1 min on `observedAt`, watermark 30 s.
+
+### 3.4 Alert episodes (clinical-api)
+
+Clinicians see **episodes**, not per-window detections. An episode is one ongoing condition: key `(patientId, type, metric)` (metric `""` when null). At most one non-RESOLVED episode per key (Postgres partial unique index).
+
+| Rule | Behaviour |
+|---|---|
+| Open | Detection with no non-RESOLVED episode for its key → new episode, `status OPEN`. Episode id = `uuid5(NAMESPACE_URL, "episode|patientId|type|metric|windowStart")` with the first detection's windowStart (same formatting as §3.2), so replays re-derive it. |
+| Update | Detection for a key with an OPEN or ACKNOWLEDGED episode → same row: `occurrences + 1`, `lastSeenAt = windowEnd`, `value`/`score`/`message`/`windowStart`/`windowEnd`/`detectedAt`/`lastDetectionId` = this detection, `version + 1`. No new row. |
+| Idempotency | Detection whose windowStart < the episode's latest windowStart → ignored (late or replayed). Same windowStart (Spark update mode re-emits) → no occurrence increment; only a severity raise applies. |
+| Severity | Episode `severity` = highest seen while open, never lowered. A raise is an **escalation**: if the episode was ACKNOWLEDGED it goes back to OPEN (acknowledgement fields kept for audit). |
+| Resolve | Scheduled job (every 30 s): OPEN/ACKNOWLEDGED episodes with `lastSeenAt` older than `ALERT_RESOLVE_AFTER` (default `PT5M`) → `RESOLVED`, `resolvedAt = now`. A later detection for the key opens a new episode. Clinicians never resolve manually. |
+| Ack | `POST /alerts/{id}/ack` on OPEN → ACKNOWLEDGED. Occurrences keep counting while acknowledged. Ack of ACKNOWLEDGED or RESOLVED → 409. A version clash caused by a concurrent ingest update is retried server-side (up to 3 times); 409 only for the two states above. |
+| Hierarchy | NEWS2 is the parent. A THRESHOLD, TREND_ZSCORE or ML_ANOMALY episode of a patient with a non-RESOLVED NEWS2 episode gets `parentAlertId` = that NEWS2 episode **if its severity ≤ the parent's**; a child that outranks the parent stays top-level. When a NEWS2 episode opens, the patient's open qualifying episodes are linked to it; when it resolves, still-open children are unlinked (become top-level). Escalation is re-checked on each update. |
+| Notify | RabbitMQ `alerts.notify` and SQS (CRITICAL) get a message only when a **top-level** episode opens or escalates (`AlertView` body, routing key by the episode's current severity). Updates, children, acks and resolutions do not notify. The existing `alert:suppress` window still applies on top. |
+| Live feed | SSE emits `event: alert` with the full AlertView on every episode change (open, update, escalation, ack, resolve, link/unlink), `id: <alertId>:<version>`; clients upsert by `alertId`. |
+| Legacy rows | Flyway migration: per key keep the newest non-RESOLVED row open (occurrences = number of rows for the key since its first open row), resolve the rest with `resolvedAt = migration time`; `firstSeenAt = window_start`, `lastSeenAt = window_end` for every row. |
 
 ## 4. REST APIs
 
@@ -132,16 +149,16 @@ Gateway behaviour: validate → idempotency check in Redis → publish to Kafka 
 ### clinical-api (8082)
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/v1/patients` | list with latest vitals (from Redis) + open alert count |
+| GET | `/api/v1/patients` | list with latest vitals (from Redis) + open alert count (`openAlerts` = top-level OPEN/ACKNOWLEDGED episodes) |
 | GET | `/api/v1/patients/{id}` | patient + latest vitals |
 | GET | `/api/v1/patients/{id}/vitals?metric=&from=&to=&resolution=raw\|minute` | from Cassandra; cache-aside in Redis (TTL 10 s) |
-| GET | `/api/v1/alerts?patientId=&severity=&status=&q=&page=&size=` | `q` → Elasticsearch full text, otherwise Postgres |
+| GET | `/api/v1/alerts?patientId=&severity=&status=&type=&topLevel=&parentAlertId=&q=&page=&size=` | episodes (§3.4). `status` repeatable (`status=OPEN&status=ACKNOWLEDGED`). `topLevel=true` → only episodes without `parentAlertId`; `parentAlertId=<id>` → that episode's children. Sorted by `lastSeenAt` desc. `q` → Elasticsearch full text, otherwise Postgres |
 | GET | `/api/v1/alerts/{id}` | |
 | POST | `/api/v1/alerts/{id}/ack` | `{"note":"..."}` → status ACKNOWLEDGED; actor from the JWT (§4.2), role CLINICIAN |
 | GET | `/api/v1/alerts/stream` | Server-Sent Events, event `alert` with AlertView JSON |
 | GET | `/api/v1/me` | `{sub, name, roles}` of the caller's token (any role); used by dashboard and copilot (§4.2) |
 
-`AlertView` = AlertEvent fields + `status` (`OPEN`, `ACKNOWLEDGED`, `RESOLVED`), `acknowledgedBy`, `acknowledgedAt`.
+`AlertView` = one **episode** (§3.4): latest-detection fields (AlertEvent shape, but `alertId` = episode id) + `status` (`OPEN`, `ACKNOWLEDGED`, `RESOLVED`), `acknowledgedBy`, `acknowledgedAt`, episode fields below.
 
 As built (clinical-api response shapes):
 
@@ -150,9 +167,9 @@ As built (clinical-api response shapes):
 | `GET /patients` | bare array of `{id, name, bed, ward, latestVitals:{METRIC:{value, unit, observedAt}}, openAlerts}` |
 | `GET /patients/{id}/vitals` | `{patientId, resolution:"RAW"\|"MINUTE", from, to, points:[…]}`. RAW point `{observedAt, metric, value, unit, deviceId}`; MINUTE point `{observedAt (window start), metric, min, max, avg, count}`. `resolution` query param is case-insensitive. |
 | `GET /alerts` | page `{items:[AlertView], page, size, totalElements, totalPages}`; `q` searches Elasticsearch (there is no `/alerts/search`) |
-| `AlertView` | `{alertId, patientId, type, severity, metric, value, score, message, windowStart, windowEnd, detectedAt, status, acknowledgedBy, acknowledgedAt, acknowledgementNote, version}` |
+| `AlertView` | `{alertId, patientId, type, severity, metric, value, score, message, windowStart, windowEnd, detectedAt, status, acknowledgedBy, acknowledgedAt, acknowledgementNote, version, firstSeenAt, lastSeenAt, occurrences, resolvedAt, parentAlertId, childCount, lastDetectionId}`. `alertId` = episode id; `severity` = episode peak; `value`/`score`/`message`/`window*`/`detectedAt` = latest detection; `childCount` = non-RESOLVED children; `resolvedAt`/`parentAlertId` nullable. Fields are additive: old clients keep working. |
 | `POST /alerts/{id}/ack` | 200 AlertView; already acknowledged / stale version → 409. The client sends no version: the server reads the current version and does a compare-and-set update (optimistic locking). |
-| `GET /alerts/stream` | SSE `event: alert`, `id: <alertId>:<version>`, data AlertView. No replay on reconnect. |
+| `GET /alerts/stream` | SSE `event: alert`, `id: <alertId>:<version>`, data AlertView, on every episode change (§3.4); clients upsert by `alertId`. No replay on reconnect. |
 | Errors | `application/problem+json`; 400 validation, 404 unknown id, 409 conflict, 503 dependency down |
 
 ### copilot (8083)
@@ -205,7 +222,7 @@ Clients:
 ## 5. Storage schemas
 
 ### PostgreSQL (`vitalstream` DB)
-- Schema `clinical` (owner clinical-api, Flyway): `patients(id text pk, name, bed, ward, created_at)`, `alerts(id uuid pk, patient_id, type, severity, metric, value, score, message, window_start, window_end, detected_at, status, acknowledged_by, acknowledged_at, version)`, `outbox(id uuid pk, aggregate_id, event_type, payload jsonb, created_at, published_at null)`.
+- Schema `clinical` (owner clinical-api, Flyway): `patients(id text pk, name, bed, ward, created_at)`, `alerts(id uuid pk, patient_id, type, severity, metric, value, score, message, window_start, window_end, detected_at, status, acknowledged_by, acknowledged_at, version, first_seen_at, last_seen_at, occurrences int, resolved_at null, parent_alert_id uuid null fk alerts, last_detection_id uuid)` — one row per **episode** (§3.4); partial unique index on `(patient_id, type, coalesce(metric, ''))` where `status <> 'RESOLVED'`; index on `(status, last_seen_at)` for the resolver, `outbox(id uuid pk, aggregate_id, event_type, payload jsonb, created_at, published_at null)`.
 - Schema `copilot` (owner copilot, Alembic): `documents(id uuid pk, title, source, created_at)`, `chunks(id uuid pk, document_id fk, ordinal, content, embedding vector(384), tsv tsvector)`; HNSW index on embedding (cosine).
 - Seed: 20 patients `P-0001`..`P-0020` (foundation seeds via init SQL; clinical-api Flyway must be idempotent with it — foundation creates only the `clinical`/`copilot` schemas and the `patients` seed in `clinical.patients` with `CREATE TABLE IF NOT EXISTS`).
 
@@ -224,13 +241,13 @@ CREATE TABLE vitals_by_minute (patient_id text, metric text, day date, window_st
 | `idem:{eventId}` | string | 24 h | ingest-gateway |
 | `rl:{deviceId}` | hash (token bucket, Lua script) | 10 s | ingest-gateway |
 | `patient:{patientId}:latest` | hash metric → JSON `{value,unit,observedAt}` | 1 h | stream-processor |
-| `ewma:{patientId}:{metric}` | hash `mean,var,n,ts` (`ts` = last applied observedAt, makes replays idempotent) | 24 h | stream-processor |
+| `ewma:{patientId}:{metric}` | hash `mean,var,n,ts,hist` over **window means** (§3.3): `ts` = last applied windowStart (replays idempotent), `hist` = last 5 windows as a string of `+`/`-`/`.` (breach up / down / none), newest last. Key format of the v1 raw-sample state is reused; on first read of a v1 hash (no `hist`) the state is reset | 24 h | stream-processor |
 | `alert:emitted:{alertId}` | string (last emitted severity) | 15 min | stream-processor – stops update-mode windows re-emitting the same alert each micro-batch; severity escalations pass |
 | `alert:suppress:{patientId}:{type}:{metric}` | string | 5 min | clinical-api |
 | `cache:vitals:{patientId}:{hash(query)}` | string JSON | 10 s | clinical-api |
 
 ### Elasticsearch
-- `alerts` index (clinical-api): mirrors AlertView; `message` text (english analyzer), keywords for ids/enums, dates.
+- `alerts` index (clinical-api): mirrors AlertView, one document per episode, upserted on every change; `message` text (english analyzer), keywords for ids/enums, dates.
 - `guidelines` index (copilot): `chunk_id`, `document_id`, `title`, `content` (text, english), for BM25 side of hybrid search.
 
 ### RabbitMQ
@@ -267,6 +284,7 @@ CREATE TABLE vitals_by_minute (patient_id text, metric text, day date, window_st
 | `LOG_LEVEL` | `INFO` | all |
 | `ARCHIVE_URI` | `s3a://vitalstream-archive/vitals_raw` | stream (bucket name differs per AWS account) |
 | `VITALSTREAM_SQS_QUEUENAME` | `alert-escalations` | clinical-api (queue name; SDK resolves the URL) |
+| `ALERT_RESOLVE_AFTER` | `PT5M` | clinical-api (ISO-8601 duration of silence before an episode auto-resolves, §3.4) |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` | `vitalstream` | clinical-api (JDBC URL carries no credentials) |
 | `METRICS_PORT` | `9404` | stream (`/health`, `/metrics`) |
 
@@ -292,6 +310,7 @@ JSON log fields: `timestamp`, `level`, `service`, `correlationId`, `message`, pl
 | `vitalstream_events_rejected_total` | counter | `reason` | ingest-gateway |
 | `vitalstream_events_dropped_total` | counter | `reason` (future\|stale) | stream-processor |
 | `vitalstream_alerts_raised_total` | counter | `severity`, `type` | stream-processor (detected), clinical-api (persisted) – add label `service` via scrape config |
+| `vitalstream_alert_episodes_total` | counter | `event` (opened\|escalated\|resolved), `type` | clinical-api (§3.4); its `vitalstream_alerts_raised_total` counts detections received |
 | `http_server_requests_seconds_bucket` | histogram | Spring default | Java services |
 | `kafka_consumergroup_lag` | gauge | kafka-exporter | foundation |
 
