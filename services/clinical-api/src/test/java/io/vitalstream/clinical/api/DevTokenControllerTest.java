@@ -19,8 +19,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.ApplicationContext;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
@@ -173,8 +173,7 @@ class DevTokenControllerTest {
     void isNotFoundEvenInDev() throws Exception {
       mvc.perform(post("/api/v1/dev/token").contentType(MediaType.APPLICATION_JSON).content(BODY))
           .andExpect(status().isNotFound());
-      mvc.perform(
-              post("/api/v1/dev/token").contentType(MediaType.APPLICATION_JSON).content("{bad"))
+      mvc.perform(post("/api/v1/dev/token").contentType(MediaType.APPLICATION_JSON).content("{bad"))
           .andExpect(status().isNotFound());
     }
 

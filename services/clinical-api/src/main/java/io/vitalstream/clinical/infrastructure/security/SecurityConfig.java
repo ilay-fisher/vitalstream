@@ -3,6 +3,7 @@ package io.vitalstream.clinical.infrastructure.security;
 import io.vitalstream.clinical.application.TokenIssuer;
 import io.vitalstream.clinical.domain.Role;
 import io.vitalstream.clinical.infrastructure.config.ClinicalProperties;
+import io.vitalstream.clinical.infrastructure.config.ConditionalOnDevTokens;
 import java.time.Clock;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -75,6 +76,7 @@ public class SecurityConfig {
   }
 
   @Bean
+  @ConditionalOnDevTokens
   TokenIssuer tokenIssuer(ClinicalProperties properties, Clock clock) {
     return new NimbusTokenIssuer(properties.jwt(), clock);
   }
