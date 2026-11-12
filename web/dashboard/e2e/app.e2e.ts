@@ -57,8 +57,31 @@ test('alert feed filters by severity and searches text', async ({ page }) => {
   await page.getByLabel('Severity').selectOption('');
   await page.getByLabel('Search alerts').fill('hypotension');
   await expect(page.getByText('No alerts match these filters.')).toBeVisible();
-  await page.getByLabel('Search alerts').fill('Systolic');
+  await page.getByLabel('Search alerts').fill('Respiratory');
   await expect(page.getByTestId('alert-list').locator('li')).toHaveCount(1);
+});
+
+test('a NEWS2 row expands to its contributing alerts and the resolved section opens', async ({
+  page,
+}) => {
+  await openAs(page, '/?streamMs=600000#/alerts');
+  const parent = page.getByTestId('alert-00000000-0000-4000-8000-000000000001');
+  await parent.getByRole('button', { name: 'Show 3 contributing alerts' }).click();
+  await expect(parent.getByTestId(/^child-/)).toHaveCount(3);
+  await page.getByRole('button', { name: 'Resolved (2)' }).click();
+  await expect(page.getByTestId(/^resolved-/)).toHaveCount(2);
+});
+
+test('one live episode is updated in place, escalates and then resolves', async ({ page }) => {
+  await openAs(page, '/?streamMs=700#/alerts');
+  const live = page.getByTestId('alert-00000000-0000-4000-8000-000000000100');
+  await expect(live).toContainText('P-0009');
+  await expect(live.getByLabel('3 occurrences')).toBeVisible();
+  await expect(live).toHaveClass(/alert-escalated/);
+  await expect(page.getByTestId('alert-00000000-0000-4000-8000-000000000100')).toHaveCount(1);
+  await expect(live).toHaveCount(0, { timeout: 10_000 });
+  await page.getByRole('button', { name: /^Resolved \(/ }).click();
+  await expect(page.getByTestId('resolved-00000000-0000-4000-8000-000000000100')).toBeVisible();
 });
 
 test('copilot streams tool calls, citations and a final answer, and reuses the session', async ({
