@@ -6,12 +6,16 @@ import io.vitalstream.clinical.application.AlertView;
 import io.vitalstream.clinical.application.OutboxMessage;
 import io.vitalstream.clinical.application.OutboxSink;
 import io.vitalstream.clinical.application.PageResult;
+import io.vitalstream.clinical.domain.AlertStatus;
 import io.vitalstream.clinical.domain.OutboxEventType;
 import io.vitalstream.clinical.infrastructure.config.ClinicalProperties;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
@@ -23,11 +27,14 @@ import tools.jackson.databind.json.JsonMapper;
  * Elasticsearch read model (CQRS-lite): the outbox feeds it, search reads from it. Uses the plain
  * REST API through {@link RestClient} to avoid client/server version coupling.
  *
- * <p>Writes use the alert {@code version} as an external document version, so a delayed index of an
- * older state can never overwrite a newer one (e.g. OPEN after ACKNOWLEDGED).
+ * <p>One document per episode, upserted on every change. Writes use the episode {@code version} as
+ * an external document version, so a delayed index of an older state can never overwrite a newer
+ * one (e.g. OPEN after ACKNOWLEDGED, or an occurrence count that went backwards).
  */
 @Component
 public class ElasticsearchAlertGateway implements OutboxSink, AlertSearch {
+
+  private static final Logger log = LoggerFactory.getLogger(ElasticsearchAlertGateway.class);
 
   private static final String MAPPING =
       """
@@ -38,7 +45,22 @@ public class ElasticsearchAlertGateway implements OutboxSink, AlertSearch {
         "windowStart":{"type":"date"},"windowEnd":{"type":"date"},"detectedAt":{"type":"date"},
         "status":{"type":"keyword"},"acknowledgedBy":{"type":"keyword"},
         "acknowledgedAt":{"type":"date"},"acknowledgementNote":{"type":"text"},
-        "version":{"type":"long"}}}}
+        "version":{"type":"long"},
+        "firstSeenAt":{"type":"date"},"lastSeenAt":{"type":"date"},"occurrences":{"type":"integer"},
+        "resolvedAt":{"type":"date"},"parentAlertId":{"type":"keyword"},
+        "childCount":{"type":"integer"},"lastDetectionId":{"type":"keyword"}}}}
+      """;
+
+  /**
+   * Episode fields added after the index may already exist. Adding them is idempotent, and doing it
+   * before the first document is written keeps ids as keywords instead of dynamic text.
+   */
+  private static final String EPISODE_MAPPING =
+      """
+      {"properties":{
+        "firstSeenAt":{"type":"date"},"lastSeenAt":{"type":"date"},"occurrences":{"type":"integer"},
+        "resolvedAt":{"type":"date"},"parentAlertId":{"type":"keyword"},
+        "childCount":{"type":"integer"},"lastDetectionId":{"type":"keyword"}}}
       """;
 
   private final RestClient client;
@@ -99,11 +121,22 @@ public class ElasticsearchAlertGateway implements OutboxSink, AlertSearch {
         items, filter.page(), filter.size(), hits.path("total").path("value").asLong(0));
   }
 
-  private Map<String, Object> searchBody(AlertFilter filter) {
+  /** Query for the filter: full text in {@code must}, structured criteria as filters. */
+  static Map<String, Object> searchBody(AlertFilter filter) {
     List<Object> filters = new ArrayList<>();
     addTerm(filters, "patientId", filter.patientId());
     addTerm(filters, "severity", filter.severity() == null ? null : filter.severity().name());
-    addTerm(filters, "status", filter.status() == null ? null : filter.status().name());
+    addTerm(filters, "type", filter.type() == null ? null : filter.type().name());
+    addTerm(
+        filters,
+        "parentAlertId",
+        filter.parentAlertId() == null ? null : filter.parentAlertId().toString());
+    if (!filter.statuses().isEmpty()) {
+      filters.add(
+          Map.of(
+              "terms",
+              Map.of("status", filter.statuses().stream().map(AlertStatus::name).toList())));
+    }
     Map<String, Object> text =
         Map.of(
             "simple_query_string",
@@ -111,12 +144,18 @@ public class ElasticsearchAlertGateway implements OutboxSink, AlertSearch {
                 "query", filter.q(),
                 "fields", List.of("message^2", "acknowledgementNote"),
                 "default_operator", "and"));
+    Map<String, Object> bool = new HashMap<>();
+    bool.put("must", List.of(text));
+    bool.put("filter", filters);
+    if (filter.topLevelOnly()) {
+      bool.put("must_not", List.of(Map.of("exists", Map.of("field", "parentAlertId"))));
+    }
     return Map.of(
         "from", filter.offset(),
         "size", filter.size(),
         "track_total_hits", true,
-        "sort", List.of(Map.of("detectedAt", "desc")),
-        "query", Map.of("bool", Map.of("must", List.of(text), "filter", filters)));
+        "sort", List.of(Map.of("lastSeenAt", "desc")),
+        "query", Map.of("bool", bool));
   }
 
   private static void addTerm(List<Object> filters, String field, String value) {
@@ -141,7 +180,26 @@ public class ElasticsearchAlertGateway implements OutboxSink, AlertSearch {
       if (!e.getResponseBodyAsString().contains("resource_already_exists_exception")) {
         throw e;
       }
+      addEpisodeFields();
     }
     indexReady.set(true);
+  }
+
+  /** The index predates episodes (an upgrade): add the new fields before any document uses them. */
+  private void addEpisodeFields() {
+    try {
+      client
+          .put()
+          .uri("/{index}/_mapping", index)
+          .contentType(MediaType.APPLICATION_JSON)
+          .body(EPISODE_MAPPING)
+          .retrieve()
+          .toBodilessEntity();
+    } catch (HttpClientErrorException.BadRequest conflictingDynamicMapping) {
+      log.warn(
+          "Index {} already maps episode fields differently, search filters on them may be off: {}",
+          index,
+          conflictingDynamicMapping.getResponseBodyAsString());
+    }
   }
 }

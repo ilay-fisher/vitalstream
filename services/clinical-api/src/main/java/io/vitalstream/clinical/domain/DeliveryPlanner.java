@@ -20,7 +20,8 @@ public final class DeliveryPlanner {
    * Every change is indexed so search stays complete; only unsuppressed notifying changes notify,
    * and only critical ones escalate.
    */
-  public static List<OutboxEventType> plan(Alert episode, EpisodeChange change, boolean suppressed) {
+  public static List<OutboxEventType> plan(
+      Alert episode, EpisodeChange change, boolean suppressed) {
     List<OutboxEventType> plan = new ArrayList<>();
     plan.add(OutboxEventType.ALERT_INDEX);
     if (notifies(episode, change) && !suppressed) {

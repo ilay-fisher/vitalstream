@@ -26,6 +26,7 @@ services:
       CLINICAL_JWT_ISSUER: ${CLINICAL_JWT_ISSUER:-vitalstream-dev}
       CLINICAL_JWT_JWK_SET_URI: ${CLINICAL_JWT_JWK_SET_URI:-}
       CLINICAL_DEV_TOKENS_ENABLED: ${CLINICAL_DEV_TOKENS_ENABLED:-true}
+      ALERT_RESOLVE_AFTER: ${ALERT_RESOLVE_AFTER:-PT5M}
     depends_on:
       kafka:
         condition: service_healthy

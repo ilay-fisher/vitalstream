@@ -25,7 +25,8 @@ public final class EpisodeHierarchy {
     }
     Alert parent = activeNews2.get();
     boolean adopts =
-        parent.status() != AlertStatus.RESOLVED && !episode.severity().isHigherThan(parent.severity());
+        parent.status() != AlertStatus.RESOLVED
+            && !episode.severity().isHigherThan(parent.severity());
     return adopts ? parent.id() : null;
   }
 }

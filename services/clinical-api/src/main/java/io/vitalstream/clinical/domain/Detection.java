@@ -5,8 +5,8 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * One stream-processor detection for a patient, type, metric and 1-minute window (CONTRACTS
- * section 3.2). Detections are not shown to clinicians; they feed {@link Alert episodes}.
+ * One stream-processor detection for a patient, type, metric and 1-minute window (CONTRACTS section
+ * 3.2). Detections are not shown to clinicians; they feed {@link Alert episodes}.
  */
 public record Detection(
     UUID id,
