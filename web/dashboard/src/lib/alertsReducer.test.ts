@@ -12,6 +12,15 @@ describe('liveAlertsReducer', () => {
     expect(s.fresh).toEqual([a.alertId, b.alertId]);
   });
 
+  it('moves an updated episode to the front instead of adding a duplicate', () => {
+    let s = liveAlertsReducer(initialLiveAlerts, { type: 'alert', alert: a });
+    s = liveAlertsReducer(s, { type: 'alert', alert: b });
+    s = liveAlertsReducer(s, { type: 'alert', alert: { ...a, occurrences: a.occurrences + 1 } });
+    expect(s.alerts.map((x) => x.alertId)).toEqual([a.alertId, b.alertId]);
+    expect(s.alerts[0].occurrences).toBe(a.occurrences + 1);
+    expect(s.fresh).toEqual([a.alertId, b.alertId]);
+  });
+
   it('upserts an alert that is repeated with a new status', () => {
     let s = liveAlertsReducer(initialLiveAlerts, { type: 'alert', alert: a });
     s = liveAlertsReducer(s, { type: 'alert', alert: { ...a, status: 'ACKNOWLEDGED' } });

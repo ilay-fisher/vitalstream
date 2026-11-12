@@ -117,6 +117,14 @@ export function normalizeAlert(raw: unknown): AlertView {
     acknowledgedAt: (r.acknowledgedAt ?? null) as string | null,
     acknowledgementNote: (r.acknowledgementNote ?? null) as string | null,
     ...(typeof r.version === 'number' ? { version: r.version } : {}),
+    // Episode fields (CONTRACTS 3.4). Defaults keep a pre-episode payload renderable.
+    firstSeenAt: String(r.firstSeenAt ?? r.detectedAt ?? ''),
+    lastSeenAt: String(r.lastSeenAt ?? r.windowEnd ?? r.detectedAt ?? ''),
+    occurrences: typeof r.occurrences === 'number' ? r.occurrences : 1,
+    resolvedAt: (r.resolvedAt ?? null) as string | null,
+    parentAlertId: (r.parentAlertId ?? null) as string | null,
+    childCount: typeof r.childCount === 'number' ? r.childCount : 0,
+    lastDetectionId: (r.lastDetectionId ?? null) as string | null,
   };
 }
 
@@ -179,10 +187,14 @@ export function createApi(options: ApiOptions = {}) {
     return response.status === 204 ? null : response.json();
   }
 
-  function query(params: Record<string, string | number | undefined>): string {
+  /** Builds a query string; an array value is repeated (`status=OPEN&status=ACKNOWLEDGED`). */
+  function query(
+    params: Record<string, string | number | boolean | readonly string[] | undefined>,
+  ): string {
     const search = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined && value !== '') search.set(key, String(value));
+      if (Array.isArray(value)) value.forEach((v) => search.append(key, v));
+      else if (value !== undefined && value !== '') search.set(key, String(value));
     }
     const text = search.toString();
     return text ? `?${text}` : '';

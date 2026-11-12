@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 
-const OUT = path.resolve(process.cwd(), '../../docs/images');
+// Captures stay inside the dashboard package; the manager copies the ones docs/ should show.
+const OUT = path.resolve(process.cwd(), 'screenshots');
 const SIZES = {
   light: { viewport: { width: 1440, height: 900 }, colorScheme: 'light' as const },
   dark: { viewport: { width: 1440, height: 900 }, colorScheme: 'dark' as const },
@@ -52,10 +53,19 @@ for (const [variant, options] of Object.entries(SIZES)) {
       });
     });
 
-    test('alert feed', async ({ page }) => {
+    test('alert feed: episodes, contributing alerts, resolved', async ({ page }) => {
       await signIn(page, `/?${QUIET}#/alerts`);
       await page.getByTestId('alert-list').waitFor();
-      await page.screenshot({ path: path.join(OUT, `dashboard-alerts-${variant}.png`) });
+      const parent = page.getByTestId('alert-00000000-0000-4000-8000-000000000001');
+      await parent.getByRole('button', { name: /Show 3 contributing alerts/ }).click();
+      await expect(parent.getByTestId(/^child-/)).toHaveCount(3);
+      await page.getByRole('button', { name: /^Resolved \(/ }).click();
+      // A sticky bar would be stamped mid-page in a full-page capture.
+      await page.addStyleTag({ content: '.topbar { position: static !important; }' });
+      await page.screenshot({
+        path: path.join(OUT, `dashboard-alerts-${variant}.png`),
+        fullPage: true,
+      });
     });
 
     test('copilot mid-stream', async ({ page }) => {

@@ -3,10 +3,10 @@ import type { AlertView } from './types';
 export type Connection = 'connecting' | 'open' | 'reconnecting';
 
 export interface LiveAlertsState {
-  /** Newest first, de-duplicated by alertId, capped. */
+  /** Most recently changed episode first, de-duplicated by alertId, capped. */
   alerts: AlertView[];
   connection: Connection;
-  /** Alert ids that arrived live since the last `clearFresh`, for highlighting. */
+  /** Episode ids first seen live since the last `clearFresh`, for highlighting. */
   fresh: string[];
 }
 
@@ -23,7 +23,10 @@ export const initialLiveAlerts: LiveAlertsState = {
   fresh: [],
 };
 
-/** Upserts SSE `alert` events: the stream repeats an alert when its status changes. */
+/**
+ * Upserts SSE `alert` events by alertId: the stream repeats an episode on every change (update,
+ * escalation, ack, resolve), so a repeat replaces the entry and moves it to the front.
+ */
 export function liveAlertsReducer(
   state: LiveAlertsState,
   action: LiveAlertsAction,
@@ -38,9 +41,8 @@ export function liveAlertsReducer(
           fresh: [...state.fresh, action.alert.alertId],
         };
       }
-      const alerts = state.alerts.slice();
-      alerts[existing] = action.alert;
-      return { ...state, alerts };
+      const alerts = state.alerts.filter((_, i) => i !== existing);
+      return { ...state, alerts: [action.alert, ...alerts] };
     }
     case 'connection':
       return { ...state, connection: action.connection };

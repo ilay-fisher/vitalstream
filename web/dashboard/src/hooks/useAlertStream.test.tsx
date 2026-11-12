@@ -11,14 +11,16 @@ const TOKEN = issueMockToken({ sub: 'nurse.levi', roles: ['CLINICIAN'] });
 const api = createApi({ getToken: () => TOKEN });
 
 describe('useAlertStream', () => {
-  it('connects, receives alert events and notifies the caller', async () => {
+  it('connects, upserts the repeated events of one episode and notifies with each alert', async () => {
     mockState.streamIntervalMs = 20;
     const onAlert = vi.fn();
     const { result, unmount } = renderHook(() => useAlertStream(api, onAlert));
-    await waitFor(() => expect(result.current.alerts.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(onAlert.mock.calls.length).toBeGreaterThanOrEqual(4));
     expect(result.current.connection).toBe('open');
-    expect(result.current.fresh.length).toBeGreaterThanOrEqual(2);
-    expect(onAlert).toHaveBeenCalled();
+    const ids = result.current.alerts.map((a) => a.alertId);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.length).toBeLessThan(onAlert.mock.calls.length);
+    expect(onAlert.mock.calls[0][0]).toMatchObject({ occurrences: 1, status: 'OPEN' });
     unmount();
   });
 

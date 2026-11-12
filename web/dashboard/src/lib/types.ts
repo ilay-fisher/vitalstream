@@ -91,7 +91,11 @@ export type Severity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type AlertType = 'THRESHOLD' | 'TREND_ZSCORE' | 'NEWS2' | 'ML_ANOMALY';
 export type AlertStatus = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED';
 
-/** AlertEvent fields plus workflow state (CONTRACTS 3.2 and 4). `version` is optional, see README. */
+/**
+ * One alert **episode** (CONTRACTS 3.4, 4 "as built"): an ongoing condition per patient, type and
+ * metric that the server updates in place. `alertId` is the episode id, `severity` the peak seen
+ * while open, and the detection fields (`value`, `score`, `message`, `window*`) are the latest.
+ */
 export interface AlertView {
   alertId: string;
   patientId: string;
@@ -109,6 +113,19 @@ export interface AlertView {
   acknowledgedAt: string | null;
   acknowledgementNote?: string | null;
   version?: number;
+  /** When the episode opened. Drives the "ongoing 12 min" label. */
+  firstSeenAt: string;
+  /** End of the latest detection window; feeds are sorted by it, newest first. */
+  lastSeenAt: string;
+  /** Number of detection windows folded into the episode. */
+  occurrences: number;
+  /** Set once the episode auto-resolved after silence; null while ongoing. */
+  resolvedAt: string | null;
+  /** The NEWS2 episode this one contributes to, if any. */
+  parentAlertId: string | null;
+  /** Non-resolved child episodes (NEWS2 parents only). */
+  childCount: number;
+  lastDetectionId?: string | null;
 }
 
 export interface LatestValue {
@@ -149,7 +166,12 @@ export interface AlertQuery {
   patientId?: string;
   severity?: Severity;
   type?: AlertType;
-  status?: AlertStatus;
+  /** Repeated on the wire: `status=OPEN&status=ACKNOWLEDGED`. */
+  status?: AlertStatus[];
+  /** `true` hides episodes that have a parent (they show under it). */
+  topLevel?: boolean;
+  /** Only the children of this episode. */
+  parentAlertId?: string;
   q?: string;
   page?: number;
   size?: number;

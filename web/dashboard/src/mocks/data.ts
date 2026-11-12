@@ -111,135 +111,236 @@ export function buildPatients(now: number = Date.now()): PatientSummary[] {
 
 export const CONFLICT_ALERT_ID = '00000000-0000-4000-8000-0000000000c1';
 
-export function buildAlerts(now: number = Date.now()): AlertView[] {
-  const minute = 60_000;
-  const make = (
-    n: number,
-    patientId: string,
-    type: AlertView['type'],
-    severity: AlertView['severity'],
-    message: string,
-    agoMin: number,
-    extra: Partial<AlertView> = {},
-  ): AlertView => {
-    const detected = now - agoMin * minute;
-    return {
-      alertId: `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
-      patientId,
-      type,
-      severity,
-      metric: null,
-      value: null,
-      score: null,
-      message,
-      windowStart: new Date(detected - 62_000).toISOString(),
-      windowEnd: new Date(detected - 2_000).toISOString(),
-      detectedAt: new Date(detected).toISOString(),
-      status: 'OPEN',
-      acknowledgedBy: null,
-      acknowledgedAt: null,
-      version: 0,
-      ...extra,
-    };
+/** Id of fixture episode number `n` (see `buildAlerts`). */
+export const episodeId = (n: number): string =>
+  `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
+/** Episode id of the P-0003 NEWS2 parent, which has three open children. */
+export const NEWS2_PARENT_ID = episodeId(1);
+
+const minute = 60_000;
+
+/** Builds one episode ending `agoMin` minutes ago and first seen `ongoingMin` before that. */
+function episode(
+  now: number,
+  n: number,
+  patientId: string,
+  type: AlertView['type'],
+  severity: AlertView['severity'],
+  message: string,
+  agoMin: number,
+  ongoingMin: number,
+  extra: Partial<AlertView> = {},
+): AlertView {
+  const lastSeen = now - agoMin * minute;
+  return {
+    alertId: `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
+    patientId,
+    type,
+    severity,
+    metric: null,
+    value: null,
+    score: null,
+    message,
+    windowStart: new Date(lastSeen - 60_000).toISOString(),
+    windowEnd: new Date(lastSeen).toISOString(),
+    detectedAt: new Date(lastSeen + 2_000).toISOString(),
+    status: 'OPEN',
+    acknowledgedBy: null,
+    acknowledgedAt: null,
+    version: 0,
+    firstSeenAt: new Date(lastSeen - ongoingMin * minute).toISOString(),
+    lastSeenAt: new Date(lastSeen).toISOString(),
+    occurrences: Math.max(1, ongoingMin + 1),
+    resolvedAt: null,
+    parentAlertId: null,
+    childCount: 0,
+    lastDetectionId: `d-${n}`,
+    ...extra,
   };
+}
+
+/**
+ * Episodes as clinical-api serves them (CONTRACTS 3.4): P-0003 has a NEWS2 parent (1) with three
+ * child episodes (2, 3, 10); two episodes are RESOLVED. Ordered by `lastSeenAt` descending.
+ */
+export function buildAlerts(now: number = Date.now()): AlertView[] {
+  const parent = NEWS2_PARENT_ID;
   return [
-    make(
+    episode(
+      now,
       1,
       'P-0003',
       'NEWS2',
       'CRITICAL',
       'NEWS2 score 12 (RR 29, SpO2 91, SBP 84, HR 119, Temp 39.2)',
-      2,
-      { score: 12 },
+      0.5,
+      23,
+      { score: 12, childCount: 3, occurrences: 24 },
     ),
-    make(
+    episode(
+      now,
       2,
       'P-0003',
       'THRESHOLD',
       'CRITICAL',
       'Systolic pressure 84 mmHg is below the critical limit (90)',
-      3,
-      { metric: 'SYSTOLIC_BP', value: 84 },
+      1,
+      14,
+      { metric: 'SYSTOLIC_BP', value: 84, parentAlertId: parent, occurrences: 15 },
     ),
-    make(3, 'P-0003', 'THRESHOLD', 'MEDIUM', 'Temperature 38.9 °C is above the normal range', 11, {
-      metric: 'TEMPERATURE',
-      value: 38.9,
-    }),
-    make(4, 'P-0007', 'NEWS2', 'CRITICAL', 'NEWS2 score 8 (RR 27, SpO2 87, HR 110)', 4, {
+    episode(now, 4, 'P-0007', 'NEWS2', 'CRITICAL', 'NEWS2 score 8 (RR 27, SpO2 87, HR 110)', 2, 9, {
       score: 8,
+      childCount: 1,
+      occurrences: 10,
     }),
-    make(5, 'P-0007', 'THRESHOLD', 'CRITICAL', 'SpO2 87 % is below the critical limit (90)', 5, {
-      metric: 'SPO2',
-      value: 87,
+    episode(
+      now,
+      5,
+      'P-0007',
+      'THRESHOLD',
+      'CRITICAL',
+      'SpO2 87 % is below the critical limit (90)',
+      2,
+      8,
+      { metric: 'SPO2', value: 87, parentAlertId: '00000000-0000-4000-8000-000000000004' },
+    ),
+    episode(now, 6, 'P-0012', 'NEWS2', 'HIGH', 'NEWS2 score 5 (RR 22, HR 104, Temp 38.2)', 3, 6, {
+      score: 5,
     }),
-    make(6, 'P-0012', 'NEWS2', 'HIGH', 'NEWS2 score 5 (RR 22, HR 104, Temp 38.2)', 8, { score: 5 }),
-    make(
+    episode(
+      now,
+      3,
+      'P-0003',
+      'THRESHOLD',
+      'MEDIUM',
+      'Temperature 38.9 °C is above the normal range',
+      4,
+      11,
+      { metric: 'TEMPERATURE', value: 38.9, parentAlertId: parent },
+    ),
+    episode(
+      now,
       7,
       'P-0016',
       'TREND_ZSCORE',
       'HIGH',
       'Heart rate 131 deviates from the recent trend (z = 3.8)',
+      5,
       14,
       { metric: 'HEART_RATE', value: 131, score: 3.8 },
     ),
-    make(
-      8,
-      'P-0005',
-      'ML_ANOMALY',
-      'MEDIUM',
-      'Vital-sign pattern is unusual for this patient (anomaly score 0.91)',
-      26,
-      { score: 0.91 },
-    ),
-    make(9, 'P-0009', 'THRESHOLD', 'MEDIUM', 'Respiratory rate 23 is above the normal range', 41, {
-      metric: 'RESP_RATE',
-      value: 23,
-    }),
-    make(
+    episode(
+      now,
       10,
       'P-0003',
       'TREND_ZSCORE',
       'HIGH',
       'Heart rate 112 deviates from the recent trend (z = 3.2)',
-      52,
+      6,
+      30,
       {
         metric: 'HEART_RATE',
         value: 112,
         score: 3.2,
+        parentAlertId: parent,
         status: 'ACKNOWLEDGED',
         acknowledgedBy: 'dr.cohen',
-        acknowledgedAt: new Date(now - 47 * minute).toISOString(),
+        acknowledgedAt: new Date(now - 20 * minute).toISOString(),
         version: 1,
       },
     ),
-    make(
-      11,
-      'P-0014',
-      'THRESHOLD',
-      'LOW',
-      'Diastolic pressure 58 mmHg is just under the normal range',
-      75,
-      { metric: 'DIASTOLIC_BP', value: 58 },
+    episode(
+      now,
+      8,
+      'P-0005',
+      'ML_ANOMALY',
+      'MEDIUM',
+      'Vital-sign pattern is unusual for this patient (anomaly score 0.91)',
+      8,
+      3,
+      { score: 0.91 },
     ),
     {
-      ...make(
+      ...episode(
+        now,
         12,
-        'P-0012',
+        'P-0015',
         'THRESHOLD',
         'MEDIUM',
         'Temperature 38.4 °C is above the normal range',
+        9,
         18,
         { metric: 'TEMPERATURE', value: 38.4 },
       ),
       alertId: CONFLICT_ALERT_ID,
     },
+    episode(
+      now,
+      9,
+      'P-0009',
+      'THRESHOLD',
+      'MEDIUM',
+      'Respiratory rate 23 is above the normal range',
+      12,
+      5,
+      { metric: 'RESP_RATE', value: 23 },
+    ),
+    episode(
+      now,
+      11,
+      'P-0014',
+      'THRESHOLD',
+      'LOW',
+      'Diastolic pressure 58 mmHg is just under the normal range',
+      15,
+      1,
+      { metric: 'DIASTOLIC_BP', value: 58 },
+    ),
+    episode(
+      now,
+      13,
+      'P-0003',
+      'THRESHOLD',
+      'HIGH',
+      'Heart rate 128 is above the normal range',
+      26,
+      12,
+      {
+        metric: 'HEART_RATE',
+        value: 128,
+        status: 'RESOLVED',
+        resolvedAt: new Date(now - 21 * minute).toISOString(),
+        version: 4,
+      },
+    ),
+    episode(
+      now,
+      14,
+      'P-0018',
+      'THRESHOLD',
+      'MEDIUM',
+      'Respiratory rate 22 is above the normal range',
+      40,
+      7,
+      {
+        metric: 'RESP_RATE',
+        value: 22,
+        status: 'RESOLVED',
+        resolvedAt: new Date(now - 35 * minute).toISOString(),
+        version: 3,
+      },
+    ),
   ];
 }
 
+/** Matches clinical-api: `openAlerts` counts top-level OPEN/ACKNOWLEDGED episodes (CONTRACTS 4). */
 export function withOpenCounts(patients: PatientSummary[], alerts: AlertView[]): PatientSummary[] {
   return patients.map((p) => ({
     ...p,
-    openAlertCount: alerts.filter((a) => a.patientId === p.id && a.status === 'OPEN').length,
+    openAlertCount: alerts.filter(
+      (a) => a.patientId === p.id && a.status !== 'RESOLVED' && !a.parentAlertId,
+    ).length,
   }));
 }
 
