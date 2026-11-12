@@ -54,7 +54,7 @@ The workflow imports inactive. Activate it in the UI (toggle top right) or with 
 
 ## Verification
 
-Against the `n8nio/n8n:1.64.3` container from `infra/compose.yaml` (profile `tools`):
+Against the `n8nio/n8n:1.123.94` image pinned in `infra/compose.yaml` (profile `tools`; tag plus digest, bumped from 1.64.3 for the security advisories fixed up to 1.123.89):
 
 ```
 $ docker exec vitalstream-n8n n8n import:credentials --input=/tmp/rabbitmq.dev.json
@@ -65,7 +65,7 @@ $ docker exec vitalstream-n8n n8n list:workflow
 vs-critical-alert-escalation|critical-alert-escalation
 ```
 
-After the authentication change the workflow was re-imported the same way into a fresh `vitalstream-n8n` container: `Successfully imported 1 workflow.` and `n8n list:workflow` shows it.
+On the same image, `GET /types/nodes.json` (behind the proxy, logged in) lists `rabbitmqTrigger`, `if`, `wait`, `httpRequest` and `set` with the `typeVersion` this workflow uses, and none of `executeCommand`, `ssh`, `code` (`NODES_EXCLUDE` still takes the `n8n-nodes-base.*` names).
 
 `e2e/tests/unit/test_delivery_files.py` additionally checks that no excluded node type is used, that every connection points at an existing node, that `Authorization` is set only in the clinical-api HTTP node header, read from the env token or the dev-token node, that no Set node carries a token, that the workflow saves no execution data, that the dev fetch asks for sub `n8n` with role `SERVICE`, that no JWT is committed, and that the compose n8n service passes `CLINICAL_API_TOKEN` and saves no execution data.
 
@@ -73,7 +73,7 @@ After the authentication change the workflow was re-imported the same way into a
 
 ![n8n critical alert escalation workflow](../../docs/images/n8n-escalation.png)
 
-Captured 2026-11-12 from the imported workflow in a local n8n 1.64.3. n8n only renders the editor after an owner account exists. For local use, keep a throwaway login in a gitignored `infra/n8n/.env` (the root `.gitignore` covers `.env`), with generated values and never a real password:
+Captured 2026-11-12 from the imported workflow in a local n8n 1.64.3 (not recaptured on 1.123.94). n8n only renders the editor after an owner account exists. For local use, keep a throwaway login in a gitignored `infra/n8n/.env` (the root `.gitignore` covers `.env`), with generated values and never a real password:
 
 ```bash
 N8N_PROXY_USER=admin
@@ -84,4 +84,4 @@ N8N_OWNER_LAST_NAME=Owner
 N8N_OWNER_PASSWORD=<generated, 8+ chars, a digit and an uppercase letter>
 ```
 
-Then, with `set -a; . infra/n8n/.env; set +a`, start n8n (`make infra-up PROFILES=tools`), import as above, and create the owner once through the proxy: `POST http://127.0.0.1:5678/rest/owner/setup` with `{"email","firstName","lastName","password"}` and the proxy basic auth. The screenshot is a Playwright page at 1440x900 with `httpCredentials` for the proxy, `POST /rest/login` with `{"email","password"}`, then `/workflow/vs-critical-alert-escalation` and Zoom to Fit.
+Then, with `set -a; . infra/n8n/.env; set +a`, start n8n (`make infra-up PROFILES=tools`), import as above, and create the owner once through the proxy: `POST http://127.0.0.1:5678/rest/owner/setup` with `{"email","firstName","lastName","password"}` and the proxy basic auth. The screenshot is a Playwright page at 1440x900 with `httpCredentials` for the proxy, `POST /rest/login` with `{"emailOrLdapLoginId","password"}` (1.64 took `{"email","password"}`), then `/workflow/vs-critical-alert-escalation` and Zoom to Fit.
