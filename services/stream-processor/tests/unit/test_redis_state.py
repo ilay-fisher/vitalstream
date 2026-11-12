@@ -31,12 +31,20 @@ def test_key_names_follow_contract() -> None:
 
 def test_ewma_roundtrip_with_ttl(client: fakeredis.FakeRedis) -> None:
     store = EwmaStore(client)
-    state = EwmaState(mean=70.0, var=2.0, n=11, last_ts=5)
+    state = EwmaState(mean=70.0, var=2.0, n=11, last_ts=5, hist="+.+")
     store.save_many({("P-0001", Metric.HEART_RATE): state})
     assert client.hgetall("ewma:P-0001:HEART_RATE")["n"] == "11"
+    assert client.hget("ewma:P-0001:HEART_RATE", "hist") == "+.+"
     assert 0 < client.ttl("ewma:P-0001:HEART_RATE") <= 24 * 3600
     loaded = store.load_many([("P-0001", Metric.HEART_RATE), ("P-0001", Metric.SPO2)])
     assert loaded == {("P-0001", Metric.HEART_RATE): state}
+
+
+def test_v1_ewma_hash_without_hist_is_treated_as_missing(client: fakeredis.FakeRedis) -> None:
+    client.hset(
+        "ewma:P-0001:HEART_RATE", mapping={"mean": "72.0", "var": "3.0", "n": "500", "ts": "99"}
+    )
+    assert EwmaStore(client).load_many([("P-0001", Metric.HEART_RATE)]) == {}
 
 
 def _reading(ms: int, value: float, iso: str) -> LatestReading:
