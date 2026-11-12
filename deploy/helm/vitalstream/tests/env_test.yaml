@@ -147,3 +147,38 @@ tests:
     asserts:
       - notExists:
           path: data.RABBITMQ_URL
+  - it: clinical-api validates tokens against the issuer and JWKS URI from values, never a secret in a ConfigMap
+    documentSelector:
+      path: metadata.name
+      value: clinical-api
+    set:
+      auth.jwt.issuer: https://idp.example.org/realms/vitalstream
+      auth.jwt.jwkSetUri: https://idp.example.org/realms/vitalstream/protocol/openid-connect/certs
+    asserts:
+      - equal:
+          path: data.CLINICAL_JWT_ISSUER
+          value: https://idp.example.org/realms/vitalstream
+      - equal:
+          path: data.CLINICAL_JWT_JWK_SET_URI
+          value: https://idp.example.org/realms/vitalstream/protocol/openid-connect/certs
+      - notExists:
+          path: data.CLINICAL_JWT_SECRET
+  - it: JWT issuer and JWKS URI are omitted by default (service defaults apply, HS256 with the secret)
+    documentSelector:
+      path: metadata.name
+      value: clinical-api
+    asserts:
+      - notExists:
+          path: data.CLINICAL_JWT_ISSUER
+      - notExists:
+          path: data.CLINICAL_JWT_JWK_SET_URI
+      - notExists:
+          path: data.CLINICAL_JWT_SECRET
+  - it: the copilot token is never rendered into a ConfigMap
+    documentSelector:
+      path: metadata.name
+      value: copilot
+    asserts:
+      - notExists:
+          path: data.CLINICAL_API_TOKEN
+
