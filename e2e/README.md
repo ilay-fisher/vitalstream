@@ -14,8 +14,14 @@ Python 3.12, `uv`, `pytest` (marker `e2e`), `httpx`, `confluent-kafka`.
 | `test_04` | stream-processor | an alert for P-0003 shows up on `alerts.detected` |
 | `test_05` | clinical-api REST | `GET /api/v1/alerts?patientId=P-0003` lists an alert the processor raised |
 | `test_06` | clinical-api SSE | `GET /api/v1/alerts/stream` (opened before the run) delivered an `alert` event |
-| `test_07` | clinical-api ack | first `POST /alerts/{id}/ack` `200` (`ACKNOWLEDGED`), second `409` |
-| `test_08` | copilot | `POST /api/v1/chat` (`LLM_PROVIDER=fake`) emits `tool_call` ok for `get_patient_vitals` / `list_alerts` and ends with `done` (no error) |
+| `test_07` | clinical-api auth | no token: `GET /alerts` and `POST .../ack` return `401` problem+json with `WWW-Authenticate: Bearer`; health stays `200` |
+| `test_08` | clinical-api auth | a VIEWER ack returns `403` and the alert stays `OPEN` |
+| `test_09` | clinical-api ack | a CLINICIAN (Nurse Levi) ack returns `200`, `acknowledgedBy` is `Nurse Levi`; the second ack is `409` |
+| `test_10` | clinical-api ack | a `by` field in the ack body is ignored: `acknowledgedBy` is the token's name (`Dr. Cohen`) |
+| `test_11` | copilot auth | `POST /api/v1/chat` without a token returns `401` problem+json |
+| `test_12` | copilot | with a user token, `POST /api/v1/chat` (`LLM_PROVIDER=fake`) emits `tool_call` ok for `get_patient_vitals` / `list_alerts` (called as that user) and ends with `done` (no error) |
+
+Tokens come from clinical-api's dev endpoint (`APP_ENV=dev`): `nurse.levi` and `dr.cohen` (CLINICIAN), `observer` (VIEWER). Tests 08-10 need at least three OPEN alerts for P-0003.
 
 Every wait is `poll_until(...)` with a timeout and a description, so a failure names the missing hop.
 

@@ -18,6 +18,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from vitalstream_e2e.auth import DR_COHEN, NURSE_LEVI, OBSERVER, DemoUser, bearer, fetch_token
 from vitalstream_e2e.kafka_tail import KafkaTail, tail_topic
 from vitalstream_e2e.polling import poll_until
 from vitalstream_e2e.probes import batch_body
@@ -102,12 +103,19 @@ def _teardown(mode: TeardownMode, env: dict[str, str]) -> None:
 
 
 @pytest.fixture(scope="session")
-def pipeline(stack: None) -> Iterator[Pipeline]:
+def tokens(stack: None) -> dict[str, str]:
+    """Dev-endpoint tokens by user sub (CLINICIAN x2, VIEWER); the stack runs with APP_ENV=dev."""
+    users: tuple[DemoUser, ...] = (NURSE_LEVI, DR_COHEN, OBSERVER)
+    return {user.sub: fetch_token(CLINICAL_API, user) for user in users}
+
+
+@pytest.fixture(scope="session")
+def pipeline(stack: None, tokens: dict[str, str]) -> Iterator[Pipeline]:
     """Start the taps, send the gateway probe, then run the sepsis scenario for P-0003."""
     state = Pipeline()
     state.vitals_tail = tail_topic(KAFKA, "vitals.raw")
     state.alerts_tail = tail_topic(KAFKA, "alerts.detected")
-    state.sse = SseCollector(_alert_stream)
+    state.sse = SseCollector(lambda: _alert_stream(tokens[OBSERVER.sub]))
     state.sse.start()
 
     log("probe: POST one reading to the gateway")
@@ -136,12 +144,12 @@ def pipeline(stack: None) -> Iterator[Pipeline]:
         state.sse.stop()
 
 
-def _alert_stream():  # type: ignore[no-untyped-def]
+def _alert_stream(token: str):  # type: ignore[no-untyped-def]
     """Open the clinical-api live feed (no replay: must be listening before alerts are raised)."""
     with httpx.stream(
         "GET",
         f"{CLINICAL_API}/api/v1/alerts/stream",
-        headers={"Accept": "text/event-stream"},
+        headers={"Accept": "text/event-stream", **bearer(token)},
         timeout=httpx.Timeout(10, read=None),
     ) as response:
         response.raise_for_status()
@@ -149,12 +157,15 @@ def _alert_stream():  # type: ignore[no-untyped-def]
 
 
 @pytest.fixture(scope="session")
-def alerts_for_patient(pipeline: Pipeline) -> list[dict[str, object]]:
+def alerts_for_patient(pipeline: Pipeline, tokens: dict[str, str]) -> list[dict[str, object]]:
     """Alerts of P-0003 from the REST API once at least one exists."""
 
     def fetch() -> list[dict[str, object]]:
         page = httpx.get(
-            f"{CLINICAL_API}/api/v1/alerts", params={"patientId": PATIENT, "size": 50}, timeout=10
+            f"{CLINICAL_API}/api/v1/alerts",
+            params={"patientId": PATIENT, "size": 50},
+            headers=bearer(tokens[OBSERVER.sub]),
+            timeout=10,
         ).json()
         return list(page["items"])
 
