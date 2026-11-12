@@ -17,14 +17,6 @@ public record ClinicalProperties(
     @DefaultValue Jwt jwt,
     @DefaultValue("dev") String appEnv) {
 
-  /**
-   * The dev token endpoint is a local-demo login without credentials, so it exists only in {@code
-   * dev} and never when an external identity provider (JWKS) is configured.
-   */
-  public boolean devTokensEnabled() {
-    return "dev".equals(appEnv) && !jwt.jwksMode();
-  }
-
   /** Outbox relay batch size (the polling interval is {@code vitalstream.outbox.interval-ms}). */
   public record Outbox(@DefaultValue("50") int batchSize) {}
 

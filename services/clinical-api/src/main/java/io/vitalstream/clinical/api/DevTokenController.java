@@ -16,9 +16,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Local demo login: hands out HS256 tokens to anyone, by design. That is only acceptable on a
- * developer machine, so the controller is a bean only with {@code APP_ENV=dev} and no external
- * identity provider (JWKS) ({@link ConditionalOnDevTokens}). Elsewhere the route does not exist, so
- * every request, even one with a malformed body, gets the ordinary 404.
+ * developer machine, so the controller is a bean only when explicitly enabled with {@code
+ * CLINICAL_DEV_TOKENS_ENABLED=true}, {@code APP_ENV=dev} and no external identity provider (JWKS)
+ * ({@link ConditionalOnDevTokens}). Otherwise the route does not exist, so every request, even one
+ * with a malformed body, gets the ordinary 404.
  */
 @RestController
 @ConditionalOnDevTokens
@@ -38,7 +39,9 @@ public class DevTokenController {
   }
 
   @PostMapping("/token")
-  @Operation(summary = "Issue a dev token (only registered with APP_ENV=dev and no JWKS)")
+  @Operation(
+      summary =
+          "Issue a dev token (opt-in: CLINICAL_DEV_TOKENS_ENABLED=true, APP_ENV=dev, no JWKS)")
   public IssuedToken token(@RequestBody(required = false) DevTokenRequest request) {
     if (request == null || request.sub() == null || request.sub().isBlank()) {
       throw new InvalidRequestException("sub is required");

@@ -25,6 +25,7 @@ services:
       CLINICAL_JWT_SECRET: ${CLINICAL_JWT_SECRET:-dev-clinical-jwt-secret-0123456789abcdef}
       CLINICAL_JWT_ISSUER: ${CLINICAL_JWT_ISSUER:-vitalstream-dev}
       CLINICAL_JWT_JWK_SET_URI: ${CLINICAL_JWT_JWK_SET_URI:-}
+      CLINICAL_DEV_TOKENS_ENABLED: ${CLINICAL_DEV_TOKENS_ENABLED:-true}
     depends_on:
       kafka:
         condition: service_healthy

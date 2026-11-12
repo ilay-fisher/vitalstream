@@ -62,21 +62,19 @@ class DevTokensStartupGuardTest {
   void flagMissingInDevRegistersNothing() {
     runner
         .withPropertyValues("vitalstream.app-env=dev")
-        .run(
-            context -> {
-              assertThat(context).hasNotFailed();
-              assertThat(context).doesNotHaveBean(DevTokenController.class);
-              assertThat(warnings()).isZero();
-            });
+        .run(context -> {
+          assertThat(context).hasNotFailed();
+          assertThat(context).doesNotHaveBean(DevTokenController.class);
+          assertThat(warnings()).isZero();
+        });
   }
 
   @Test
   void flagAndAppEnvBothMissingRegistersNothing() {
-    runner.run(
-        context -> {
-          assertThat(context).hasNotFailed();
-          assertThat(context).doesNotHaveBean(DevTokenController.class);
-        });
+    runner.run(context -> {
+      assertThat(context).hasNotFailed();
+      assertThat(context).doesNotHaveBean(DevTokenController.class);
+    });
   }
 
   @Test
@@ -90,27 +88,25 @@ class DevTokensStartupGuardTest {
   void flagTrueInDevWithoutJwksRegistersTheControllerAndWarnsOnce() {
     runner
         .withPropertyValues("vitalstream.app-env=dev", "vitalstream.dev-tokens-enabled=true")
-        .run(
-            context -> {
-              assertThat(context).hasNotFailed();
-              assertThat(context).hasSingleBean(DevTokenController.class);
-              assertThat(warnings()).isEqualTo(1);
-            });
+        .run(context -> {
+          assertThat(context).hasNotFailed();
+          assertThat(context).hasSingleBean(DevTokenController.class);
+          assertThat(warnings()).isEqualTo(1);
+        });
   }
 
   @Test
   void flagTrueOutsideDevFailsStartupWithAClearMessage() {
     runner
         .withPropertyValues("vitalstream.app-env=prod", "vitalstream.dev-tokens-enabled=true")
-        .run(
-            context -> {
-              assertThat(context).hasFailed();
-              assertThat(context.getStartupFailure())
-                  .rootCause()
-                  .isInstanceOf(IllegalStateException.class)
-                  .hasMessageContaining("CLINICAL_DEV_TOKENS_ENABLED=true")
-                  .hasMessageContaining("APP_ENV");
-            });
+        .run(context -> {
+          assertThat(context).hasFailed();
+          assertThat(context.getStartupFailure())
+              .rootCause()
+              .isInstanceOf(IllegalStateException.class)
+              .hasMessageContaining("CLINICAL_DEV_TOKENS_ENABLED=true")
+              .hasMessageContaining("APP_ENV");
+        });
   }
 
   @Test
@@ -120,15 +116,14 @@ class DevTokensStartupGuardTest {
             "vitalstream.app-env=dev",
             "vitalstream.dev-tokens-enabled=true",
             "vitalstream.jwt.jwk-set-uri=https://idp.example/jwks")
-        .run(
-            context -> {
-              assertThat(context).hasFailed();
-              assertThat(context.getStartupFailure())
-                  .rootCause()
-                  .isInstanceOf(IllegalStateException.class)
-                  .hasMessageContaining("CLINICAL_DEV_TOKENS_ENABLED=true")
-                  .hasMessageContaining("CLINICAL_JWT_JWK_SET_URI");
-            });
+        .run(context -> {
+          assertThat(context).hasFailed();
+          assertThat(context.getStartupFailure())
+              .rootCause()
+              .isInstanceOf(IllegalStateException.class)
+              .hasMessageContaining("CLINICAL_DEV_TOKENS_ENABLED=true")
+              .hasMessageContaining("CLINICAL_JWT_JWK_SET_URI");
+        });
   }
 
   @Test
