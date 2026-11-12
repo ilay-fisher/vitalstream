@@ -13,7 +13,9 @@ import java.util.UUID;
  *
  * <p>{@code windowStart}, {@code windowEnd}, {@code detectedAt}, {@code value}, {@code score} and
  * {@code message} always describe the latest absorbed detection; {@code severity} is the peak.
- * {@code childCount} is read-only information filled by the store when loading.
+ * {@code childCount} is read-only information filled by the store when loading. {@code
+ * notifyPending} means a notification was skipped as stale and is still owed once the episode is
+ * fresh again (CONTRACTS section 3.4, Staleness).
  */
 public record Alert(
     UUID id,
@@ -38,7 +40,8 @@ public record Alert(
     Instant resolvedAt,
     UUID parentAlertId,
     int childCount,
-    UUID lastDetectionId) {
+    UUID lastDetectionId,
+    boolean notifyPending) {
 
   public Alert {
     Objects.requireNonNull(id, "id");
@@ -73,7 +76,8 @@ public record Alert(
         null,
         null,
         0,
-        d.id());
+        d.id(),
+        false);
   }
 
   /** Top-level episodes are the ones clinicians are paged for; children hang under a NEWS2. */
@@ -146,6 +150,16 @@ public record Alert(
   public Alert withParent(UUID parent) {
     Builder b = toBuilder();
     b.parentAlertId = parent;
+    if (parent != null) {
+      b.notifyPending = false;
+    }
+    return b.build();
+  }
+
+  /** Copy with the owed-notification flag set or cleared. */
+  public Alert withNotifyPending(boolean pending) {
+    Builder b = toBuilder();
+    b.notifyPending = pending;
     return b.build();
   }
 
@@ -169,6 +183,7 @@ public record Alert(
     Builder b = toBuilder();
     b.status = AlertStatus.RESOLVED;
     b.resolvedAt = at;
+    b.notifyPending = false;
     return b.build();
   }
 
@@ -186,6 +201,7 @@ public record Alert(
     b.acknowledgedBy = by;
     b.acknowledgedAt = at;
     b.acknowledgementNote = note;
+    b.notifyPending = false;
     return b.build();
   }
 
@@ -214,10 +230,11 @@ public record Alert(
     b.parentAlertId = parentAlertId;
     b.childCount = childCount;
     b.lastDetectionId = lastDetectionId;
+    b.notifyPending = notifyPending;
     return b;
   }
 
-  /** Mutable scratch copy so that the 23-field record is rebuilt in exactly one place. */
+  /** Mutable scratch copy so that the 24-field record is rebuilt in exactly one place. */
   private static final class Builder {
     UUID id;
     String patientId;
@@ -242,6 +259,7 @@ public record Alert(
     UUID parentAlertId;
     int childCount;
     UUID lastDetectionId;
+    boolean notifyPending;
 
     Alert build() {
       return new Alert(
@@ -267,7 +285,8 @@ public record Alert(
           resolvedAt,
           parentAlertId,
           childCount,
-          lastDetectionId);
+          lastDetectionId,
+          notifyPending);
     }
   }
 }

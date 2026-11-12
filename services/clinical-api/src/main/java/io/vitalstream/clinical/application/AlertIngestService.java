@@ -12,6 +12,8 @@ import io.vitalstream.clinical.domain.EpisodeHierarchy;
 import io.vitalstream.clinical.domain.OutboxEventType;
 import io.vitalstream.clinical.domain.SuppressionPolicy;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -22,6 +24,7 @@ import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /**
@@ -55,6 +58,8 @@ public class AlertIngestService {
   private final UnitOfWork unitOfWork;
   private final EpisodeEffects effects;
   private final MeterRegistry meters;
+  private final Clock clock;
+  private final Duration resolveAfter;
 
   public AlertIngestService(
       AlertRepository alerts,
@@ -64,12 +69,15 @@ public class AlertIngestService {
       UnitOfWork unitOfWork,
       OutboxPayloads payloads,
       Clock clock,
-      MeterRegistry meters) {
+      MeterRegistry meters,
+      @Value("${vitalstream.episodes.resolve-after:PT5M}") Duration resolveAfter) {
     this.alerts = alerts;
     this.suppression = suppression;
     this.unitOfWork = unitOfWork;
     this.effects = new EpisodeEffects(outbox, liveFeed, payloads, clock);
     this.meters = meters;
+    this.clock = clock;
+    this.resolveAfter = resolveAfter;
   }
 
   /** Applies the detection and queues its side effects; the live feed is notified after commit. */
@@ -156,10 +164,18 @@ public class AlertIngestService {
 
     Alert stored = alerts.findById(written.id()).orElseThrow();
     AlertView view = AlertView.from(stored);
+    Instant staleBefore = clock.instant().minus(resolveAfter);
+    if (DeliveryPlanner.skippedAsStale(stored, change, staleBefore)) {
+      StaleNotifications.skipped(meters, stored);
+    }
     boolean suppressed =
-        DeliveryPlanner.notifies(stored, change) && !claimNotificationWindow(stored);
-    for (OutboxEventType type : DeliveryPlanner.plan(stored, change, suppressed)) {
+        DeliveryPlanner.notifies(stored, change, staleBefore) && !claimNotificationWindow(stored);
+    for (OutboxEventType type : DeliveryPlanner.plan(stored, change, suppressed, staleBefore)) {
       effects.enqueue(type, view, correlationId);
+    }
+    boolean pending = DeliveryPlanner.nextNotifyPending(stored, change, staleBefore);
+    if (pending != stored.notifyPending()) {
+      alerts.setNotifyPending(stored.id(), pending);
     }
 
     List<AlertView> views = new ArrayList<>(List.of(view));

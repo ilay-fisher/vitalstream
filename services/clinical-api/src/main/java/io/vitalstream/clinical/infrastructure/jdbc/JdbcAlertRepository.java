@@ -35,7 +35,7 @@ public class JdbcAlertRepository implements AlertRepository {
       SELECT a.id, a.patient_id, a.type, a.severity, a.metric, a.value, a.score, a.message,
              a.window_start, a.window_end, a.detected_at, a.status, a.acknowledged_by,
              a.acknowledged_at, a.ack_note, a.version, a.first_seen_at, a.last_seen_at,
-             a.occurrences, a.resolved_at, a.parent_alert_id, a.last_detection_id,
+             a.occurrences, a.resolved_at, a.parent_alert_id, a.last_detection_id, a.notify_pending,
              (SELECT count(*) FROM clinical.alerts c
                WHERE c.parent_alert_id = a.id AND c.status <> 'RESOLVED') AS child_count
         FROM clinical.alerts a
@@ -76,11 +76,13 @@ public class JdbcAlertRepository implements AlertRepository {
                 INSERT INTO clinical.alerts
                   (id, patient_id, type, severity, metric, value, score, message,
                    window_start, window_end, detected_at, status, version,
-                   first_seen_at, last_seen_at, occurrences, parent_alert_id, last_detection_id)
+                   first_seen_at, last_seen_at, occurrences, parent_alert_id, last_detection_id,
+                   notify_pending)
                 VALUES
                   (:id, :patientId, :type, :severity, :metric, :value, :score, :message,
                    :windowStart, :windowEnd, :detectedAt, :status, 0,
-                   :firstSeenAt, :lastSeenAt, :occurrences, :parent, :lastDetectionId)
+                   :firstSeenAt, :lastSeenAt, :occurrences, :parent, :lastDetectionId,
+                   :pending)
                 ON CONFLICT DO NOTHING
                 """)
             .param("id", episode.id())
@@ -100,6 +102,7 @@ public class JdbcAlertRepository implements AlertRepository {
             .param("occurrences", episode.occurrences())
             .param("parent", episode.parentAlertId())
             .param("lastDetectionId", episode.lastDetectionId())
+            .param("pending", episode.notifyPending())
             .update();
     return rows == 1;
   }
@@ -114,7 +117,8 @@ public class JdbcAlertRepository implements AlertRepository {
                        window_start = :windowStart, window_end = :windowEnd,
                        detected_at = :detectedAt, status = :status, last_seen_at = :lastSeenAt,
                        occurrences = :occurrences, parent_alert_id = :parent,
-                       last_detection_id = :lastDetectionId, version = version + 1
+                       last_detection_id = :lastDetectionId, notify_pending = :pending,
+                       version = version + 1
                  WHERE id = :id AND version = :expected
                 """)
             .param("severity", episode.severity().name())
@@ -129,6 +133,7 @@ public class JdbcAlertRepository implements AlertRepository {
             .param("occurrences", episode.occurrences())
             .param("parent", episode.parentAlertId())
             .param("lastDetectionId", episode.lastDetectionId())
+            .param("pending", episode.notifyPending())
             .param("id", episode.id())
             .param("expected", expectedVersion)
             .update();
@@ -141,7 +146,7 @@ public class JdbcAlertRepository implements AlertRepository {
         jdbc.sql(
                 """
                 UPDATE clinical.alerts
-                   SET status = :status, acknowledged_by = :by, acknowledged_at = :at,
+                   SET status = :status, notify_pending = false, acknowledged_by = :by, acknowledged_at = :at,
                        ack_note = :note, version = version + 1
                  WHERE id = :id AND version = :expected
                 """)
@@ -160,7 +165,7 @@ public class JdbcAlertRepository implements AlertRepository {
     return jdbc.sql(
             """
             UPDATE clinical.alerts
-               SET parent_alert_id = :parent, version = version + 1
+               SET parent_alert_id = :parent, notify_pending = false, version = version + 1
              WHERE patient_id = :patientId AND status <> 'RESOLVED' AND type <> 'NEWS2'
                AND parent_alert_id IS NULL AND severity IN (:severities)
             RETURNING id
@@ -197,11 +202,20 @@ public class JdbcAlertRepository implements AlertRepository {
   }
 
   @Override
+  public void setNotifyPending(UUID id, boolean pending) {
+    jdbc.sql("UPDATE clinical.alerts SET notify_pending = :pending WHERE id = :id")
+        .param("pending", pending)
+        .param("id", id)
+        .update();
+  }
+
+  @Override
   public List<ResolvedEpisode> resolveStale(Instant cutoff, Instant resolvedAt) {
     return jdbc.sql(
             """
             UPDATE clinical.alerts
-               SET status = 'RESOLVED', resolved_at = :resolvedAt, version = version + 1
+               SET status = 'RESOLVED', resolved_at = :resolvedAt, notify_pending = false,
+                   version = version + 1
              WHERE status <> 'RESOLVED' AND last_seen_at < :cutoff
             RETURNING id, type, parent_alert_id
             """)
@@ -308,6 +322,7 @@ public class JdbcAlertRepository implements AlertRepository {
         Timestamps.read(rs, "resolved_at"),
         rs.getObject("parent_alert_id", UUID.class),
         rs.getInt("child_count"),
-        rs.getObject("last_detection_id", UUID.class));
+        rs.getObject("last_detection_id", UUID.class),
+        rs.getBoolean("notify_pending"));
   }
 }

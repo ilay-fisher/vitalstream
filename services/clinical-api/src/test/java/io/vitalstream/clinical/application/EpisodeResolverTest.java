@@ -177,6 +177,46 @@ class EpisodeResolverTest {
     assertThat(resolverAt(SEEN.plus(Duration.ofHours(1))).resolveStale()).isEqualTo(1);
   }
 
+  @Test
+  void aSilentChildUnlinkedByItsParentIsNotPagedAndIsCounted() {
+    // parent and child are both already silent for longer than the threshold at sweep time
+    Alert parent = Alert.open(TestAlerts.detection(AlertType.NEWS2, Severity.HIGH, null, -2));
+    Alert child = Alert.open(TestAlerts.detection(Severity.MEDIUM, 0)).withParent(parent.id());
+    // a sweep that resolves only the parent leaves the silent child to be unlinked (a race
+    // between the resolver statement and a concurrent write can produce this in production)
+    InMemoryAlertRepository onlyParentDue =
+        new InMemoryAlertRepository() {
+          @Override
+          public List<ResolvedEpisode> resolveStale(Instant cutoff, Instant now) {
+            return super.resolveStale(cutoff.minusSeconds(60), now);
+          }
+        };
+    onlyParentDue.seed(parent);
+    onlyParentDue.seed(child);
+    EpisodeResolver resolver =
+        new EpisodeResolver(
+            onlyParentDue,
+            outbox,
+            suppression,
+            liveFeed,
+            new DirectUnitOfWork(),
+            new OutboxPayloads(JsonMapper.builder().build()),
+            Clock.fixed(AFTER_PARENT, ZoneOffset.UTC),
+            meters,
+            Duration.ofMinutes(5));
+
+    resolver.resolveStale();
+
+    assertThat(onlyParentDue.get(child.id()).parentAlertId()).isNull();
+    assertThat(outboxRows())
+        .filteredOn(r -> r.aggregateId().equals(child.id()))
+        .extracting(OutboxEntry::eventType)
+        .containsExactly(OutboxEventType.ALERT_INDEX);
+    assertThat(meters.counter("vitalstream.alert.notifications.skipped", "reason", "stale").count())
+        .isEqualTo(1.0);
+    verify(liveFeed, org.mockito.Mockito.atLeast(2)).publish(any());
+  }
+
   private Alert[] parentWithChild(boolean acknowledged) {
     Alert parent = Alert.open(TestAlerts.detection(AlertType.NEWS2, Severity.HIGH, null, 0));
     Alert child = Alert.open(TestAlerts.detection(Severity.MEDIUM, 3)).withParent(parent.id());
