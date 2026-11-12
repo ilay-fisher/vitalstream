@@ -41,9 +41,57 @@ def test_fragment_does_not_redefine_shared_network_as_default(fragment):
     assert "default" not in networks
 
 
-def test_n8n_healthcheck_avoids_localhost():
-    """Colima resolves localhost to ::1 while n8n listens on IPv4 only."""
-    test = load("infra/compose.yaml")["services"]["n8n"]["healthcheck"]["test"]
+# Healthchecks that predate this rule and are verified healthy on Colima with `localhost`
+# (their servers listen on both stacks). New or changed healthchecks must use 127.0.0.1.
+LOCALHOST_GRANDFATHERED = {
+    "kafka", "kafka-exporter", "kafka-ui", "elasticsearch", "kibana", "localstack",
+    "prometheus", "grafana", "ingest-gateway",
+}
 
-    assert "localhost" not in " ".join(test)
-    assert "127.0.0.1" in " ".join(test)
+
+def healthchecks() -> list[tuple[str, str]]:
+    found = []
+    for rel in ["infra/compose.yaml", *FRAGMENTS]:
+        for name, service in load(rel)["services"].items():
+            test = service.get("healthcheck", {}).get("test")
+            if test:
+                found.append((name, " ".join(test)))
+    return found
+
+
+@pytest.mark.parametrize(("service", "test"), healthchecks())
+def test_healthcheck_avoids_localhost(service, test):
+    """Colima resolves localhost to ::1; a service listening on IPv4 only then stays unhealthy."""
+    if service in LOCALHOST_GRANDFATHERED:
+        pytest.skip("grandfathered, dual-stack listener")
+
+    assert "localhost" not in test
+
+
+@pytest.mark.parametrize("service", ["n8n", "n8n-proxy"])
+def test_n8n_healthchecks_use_ipv4_loopback(service):
+    test = dict(healthchecks())[service]
+
+    assert "127.0.0.1" in test
+
+
+def up_recipe() -> str:
+    lines = (REPO / "Makefile").read_text().splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("up:"))
+    end = next((i for i in range(start + 1, len(lines)) if lines[i] and not lines[i].startswith(("\t", "#"))), len(lines))
+    return "\n".join(lines[start:end])
+
+
+def test_up_waits_only_on_non_init_services():
+    """`--wait` treats exited one-shot init containers as failures, so they must be excluded."""
+    recipe = up_recipe()
+    wait_lines = [line for line in recipe.splitlines() if "--wait" in line]
+
+    assert wait_lines
+    assert all("grep -v '^init-'" in line for line in wait_lines)
+    assert "--build" in recipe
+    assert "--wait-timeout 600" in recipe
+
+
+def test_up_checks_init_containers_exit_code():
+    assert "docker wait" in up_recipe()
