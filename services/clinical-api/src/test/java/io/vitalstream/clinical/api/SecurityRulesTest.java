@@ -45,7 +45,12 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /** CONTRACTS section 4.2: who may call what, and the shape of the 401 and 403 answers. */
-@WebMvcTest({AlertController.class, PatientController.class, DevTokenController.class})
+@WebMvcTest({
+  AlertController.class,
+  PatientController.class,
+  DevTokenController.class,
+  MeController.class
+})
 @Import({SecurityConfig.class, WebConfig.class})
 @EnableConfigurationProperties(ClinicalProperties.class)
 class SecurityRulesTest {
@@ -333,6 +338,35 @@ class SecurityRulesTest {
     mvc.perform(post("/api/v1/alerts/" + id + "/ack").header("Authorization", bearer(clinician)))
         .andExpect(status().isOk());
     mvc.perform(post("/api/v1/alerts/" + id + "/ack").header("Authorization", bearer(viewer)))
+        .andExpect(status().isForbidden());
+  }
+
+  // ---- /me -----------------------------------------------------------------------------------
+
+  @Test
+  void meReturnsSubNameAndKnownRoles() throws Exception {
+    String token = TestTokens.valid("observer", "Observer", "VIEWER", "ADMIN");
+
+    mvc.perform(get("/api/v1/me").header("Authorization", bearer(token)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.sub").value("observer"))
+        .andExpect(jsonPath("$.name").value("Observer"))
+        .andExpect(jsonPath("$.roles[0]").value("VIEWER"))
+        .andExpect(jsonPath("$.roles.length()").value(1));
+  }
+
+  @Test
+  void meFallsBackToSubWhenThereIsNoName() throws Exception {
+    String token = TestTokens.valid("copilot-mcp", null, "SERVICE");
+
+    mvc.perform(get("/api/v1/me").header("Authorization", bearer(token)))
+        .andExpect(jsonPath("$.name").value("copilot-mcp"));
+  }
+
+  @Test
+  void meNeedsAKnownRoleAndAToken() throws Exception {
+    mvc.perform(get("/api/v1/me")).andExpect(status().isUnauthorized());
+    mvc.perform(get("/api/v1/me").header("Authorization", bearer(adminToken())))
         .andExpect(status().isForbidden());
   }
 }

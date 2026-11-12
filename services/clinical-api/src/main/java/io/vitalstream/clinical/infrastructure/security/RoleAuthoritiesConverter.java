@@ -14,7 +14,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
  */
 public class RoleAuthoritiesConverter implements Converter<Jwt, Collection<GrantedAuthority>> {
 
-  static final String CLAIM = "roles";
+  public static final String CLAIM = "roles";
 
   @Override
   public Collection<GrantedAuthority> convert(Jwt jwt) {
