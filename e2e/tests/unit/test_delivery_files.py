@@ -190,3 +190,63 @@ def test_n8n_workflow_contains_no_real_endpoint_or_secret():
 
     assert "$env.ESCALATION_WEBHOOK_URL" in text
     assert not re.search(r"https?://(?!clinical-api)", text)
+
+
+def _node(workflow: dict, name: str) -> dict:
+    return next(n for n in workflow["nodes"] if n["name"] == name)
+
+
+def _sources_of(workflow: dict, target: str) -> set[str]:
+    return {
+        source
+        for source, outputs in workflow["connections"].items()
+        for branch in outputs["main"]
+        for link in branch
+        if link["node"] == target
+    }
+
+
+def test_n8n_clinical_api_call_sends_a_bearer_token_fed_by_both_token_sources():
+    workflow = n8n_workflow()
+    get_alert = _node(workflow, "Get alert from clinical-api")
+
+    params = get_alert["parameters"]["headerParameters"]["parameters"]
+    headers = {h["name"]: h["value"] for h in params}
+
+    assert headers["Authorization"] == "=Bearer {{ $json.token }}"
+    assert _sources_of(workflow, "Get alert from clinical-api") == {
+        "Use configured token",
+        "Token from dev endpoint",
+    }
+
+
+def test_n8n_token_is_the_env_token_or_a_dev_service_token_for_sub_n8n():
+    workflow = n8n_workflow()
+    configured = json.dumps(_node(workflow, "Use configured token")["parameters"])
+    check = json.dumps(_node(workflow, "Configured token set?")["parameters"])
+    fetch = _node(workflow, "Fetch dev token")["parameters"]
+
+    assert "$env.CLINICAL_API_TOKEN" in configured
+    assert "$env.CLINICAL_API_TOKEN" in check
+    assert fetch["method"] == "POST"
+    assert fetch["url"].endswith("/api/v1/dev/token")
+    assert "sub: 'n8n'" in fetch["jsonBody"]
+    assert "SERVICE" in fetch["jsonBody"]
+    # "token set" goes to the env token, "not set" to the dev fetch
+    branches = workflow["connections"]["Configured token set?"]["main"]
+    assert [link["node"] for link in branches[0]] == ["Use configured token"]
+    assert [link["node"] for link in branches[1]] == ["Fetch dev token"]
+
+
+def test_n8n_workflow_commits_no_token():
+    text = (REPO / "infra/n8n/critical-alert-escalation.json").read_text()
+
+    assert not re.search(r"eyJ[A-Za-z0-9_-]{10,}", text)
+
+
+def test_n8n_service_gets_the_clinical_api_token_from_the_environment():
+    compose = load_yaml("infra/compose.yaml")
+
+    env = compose["services"]["n8n"]["environment"]
+
+    assert env["CLINICAL_API_TOKEN"] == "${CLINICAL_API_TOKEN:-}"
