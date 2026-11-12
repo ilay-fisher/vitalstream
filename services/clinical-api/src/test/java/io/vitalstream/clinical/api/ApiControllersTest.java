@@ -28,6 +28,7 @@ import io.vitalstream.clinical.application.VitalsQuery;
 import io.vitalstream.clinical.application.VitalsQueryService;
 import io.vitalstream.clinical.domain.AlertNotFoundException;
 import io.vitalstream.clinical.domain.AlertStatus;
+import io.vitalstream.clinical.domain.AlertType;
 import io.vitalstream.clinical.domain.ConcurrentAlertUpdateException;
 import io.vitalstream.clinical.domain.InvalidStatusTransitionException;
 import io.vitalstream.clinical.domain.PatientNotFoundException;
@@ -109,7 +110,53 @@ class ApiControllersTest {
     ArgumentCaptor<AlertFilter> filter = ArgumentCaptor.forClass(AlertFilter.class);
     verify(alertQueries).list(filter.capture());
     org.assertj.core.api.Assertions.assertThat(filter.getValue())
-        .isEqualTo(new AlertFilter("P-0001", Severity.HIGH, AlertStatus.OPEN, "heart", 1, 10));
+        .isEqualTo(
+            new AlertFilter(
+                "P-0001",
+                Severity.HIGH,
+                List.of(AlertStatus.OPEN),
+                null,
+                false,
+                null,
+                "heart",
+                1,
+                10));
+  }
+
+  @Test
+  void listAcceptsRepeatableStatusTypeTopLevelAndParent() throws Exception {
+    when(alertQueries.list(any())).thenReturn(new PageResult<>(List.of(), 0, 20, 0));
+    UUID parent = UUID.randomUUID();
+
+    mvc.perform(
+            get("/api/v1/alerts")
+                .param("status", "OPEN")
+                .param("status", "ACKNOWLEDGED")
+                .param("type", "NEWS2")
+                .param("topLevel", "true")
+                .param("parentAlertId", parent.toString()))
+        .andExpect(status().isOk());
+
+    ArgumentCaptor<AlertFilter> filter = ArgumentCaptor.forClass(AlertFilter.class);
+    verify(alertQueries).list(filter.capture());
+    org.assertj.core.api.Assertions.assertThat(filter.getValue())
+        .isEqualTo(
+            new AlertFilter(
+                null,
+                null,
+                List.of(AlertStatus.OPEN, AlertStatus.ACKNOWLEDGED),
+                AlertType.NEWS2,
+                true,
+                parent,
+                null,
+                0,
+                20));
+  }
+
+  @Test
+  void listRejectsAMalformedParentId() throws Exception {
+    mvc.perform(get("/api/v1/alerts").param("parentAlertId", "not-a-uuid"))
+        .andExpect(status().isBadRequest());
   }
 
   @Test

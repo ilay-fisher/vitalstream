@@ -184,4 +184,22 @@ class EpisodeTest {
     assertThatThrownBy(() -> resolved.acknowledge("b", null, NOW))
         .isInstanceOf(InvalidStatusTransitionException.class);
   }
+
+  @Test
+  void resolveClosesAnOpenOrAcknowledgedEpisode() {
+    Alert open = TestAlerts.alert(Severity.HIGH);
+    Alert acked = open.acknowledge("dr", null, NOW);
+
+    assertThat(open.resolve(NOW).status()).isEqualTo(AlertStatus.RESOLVED);
+    assertThat(open.resolve(NOW).resolvedAt()).isEqualTo(NOW);
+    assertThat(acked.resolve(NOW).acknowledgedBy()).isEqualTo("dr");
+  }
+
+  @Test
+  void aResolvedEpisodeCannotBeResolvedAgain() {
+    Alert resolved = TestAlerts.alert(Severity.HIGH).resolve(NOW);
+
+    assertThatThrownBy(() -> resolved.resolve(NOW))
+        .isInstanceOf(InvalidStatusTransitionException.class);
+  }
 }
