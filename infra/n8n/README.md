@@ -7,10 +7,8 @@ flowchart LR
     Q[RabbitMQ trigger<br/>queue notify.critical] --> F{severity = CRITICAL}
     F -- yes --> W[Wait N minutes]
     W --> T{CLINICAL_API_TOKEN set}
-    T -- yes --> U[Set token from env]
-    T -- no, dev only --> D[POST /api/v1/dev/token<br/>sub n8n, role SERVICE] --> V[Set token]
-    U --> G[GET clinical-api<br/>/api/v1/alerts/id<br/>Authorization: Bearer]
-    V --> G
+    T -- yes --> G[GET clinical-api<br/>/api/v1/alerts/id<br/>Authorization: Bearer env token]
+    T -- no, dev only --> D[POST /api/v1/dev/token<br/>sub n8n, role SERVICE] --> G
     G --> O{status = OPEN}
     O -- yes --> P[POST ESCALATION_WEBHOOK_URL]
     P --> L1[Set: log ESCALATED]
@@ -22,10 +20,10 @@ flowchart LR
 * clinical-api publishes each alert to the topic exchange `alerts.notify` with routing key `alert.<severity>` (CONTRACTS section 5). The queue `notify.critical` is bound to `alert.critical`, so the trigger consumes only CRITICAL alerts; the IF node re-checks `severity` anyway so a rebinding cannot escalate a lower severity.
 * The message body is the `AlertView` JSON; the trigger parses it (`jsonParseBody`, `onlyContent`).
 * After the wait the alert is re-read from `GET /api/v1/alerts/{alertId}` (the ack endpoint changes `status` to `ACKNOWLEDGED`). Only `OPEN` alerts escalate. The request carries `X-Correlation-Id: n8n-escalation-<alertId>` and `Authorization: Bearer <token>`: clinical-api requires a JWT (CONTRACTS section 4.2) and any role may read, so a `SERVICE` token is enough.
-* Where the token comes from: the env var `CLINICAL_API_TOKEN` when it is set (the way to run anywhere but a developer machine). Otherwise a preceding node asks clinical-api's dev endpoint `POST /api/v1/dev/token` for a `SERVICE` token for sub `n8n`; that endpoint only exists with `APP_ENV=dev` and no JWKS, so elsewhere the workflow fails at that node rather than working without credentials. No token is stored in the workflow file. The token is a field of the node output, so it is visible in the execution data of the n8n UI; treat access to n8n accordingly.
+* Where the token comes from: the env var `CLINICAL_API_TOKEN` when it is set (the way to run anywhere but a developer machine). Otherwise a preceding node (`Fetch dev token`) asks clinical-api's dev endpoint `POST /api/v1/dev/token` for a `SERVICE` token for sub `n8n`; that endpoint only exists with `APP_ENV=dev` and no JWKS, so elsewhere the workflow fails at that node rather than working without credentials. No token is stored in the workflow file. The HTTP node's header expression is `Bearer {{ $env.CLINICAL_API_TOKEN || $('Fetch dev token').item.json.token }}`, the only place a token is read: no Set node copies it into item data. n8n would still save the dev-token node's response with the execution, so the workflow settings (`saveDataSuccessExecution`, `saveDataErrorExecution`: `none`, `saveManualExecutions`: `false`) and the n8n service (`EXECUTIONS_DATA_SAVE_ON_SUCCESS=none`, `EXECUTIONS_DATA_SAVE_ON_ERROR=none` in `infra/compose.yaml`) keep no execution data at all: neither tokens nor alert contents (PHI) end up in the n8n database. The cost: the Executions tab is empty, so the "Log" Set nodes are visible only while debugging a manual run in the editor; turn saving on locally only with synthetic data.
 * The queue message is acknowledged when the execution finishes, so a crash while waiting redelivers the alert (the DLX `alerts.notify.dlx` takes over after rejects).
 * Nodes used: RabbitMQ Trigger, IF, Wait, HTTP Request, Set. `executeCommand`, `ssh` and `code` are in `NODES_EXCLUDE` (infra/compose.yaml) and are not used.
-* "Log" is the Set node `log` field: n8n stores it in the execution data (Executions tab), which is the audit trail. A failed webhook POST does not fail the run (`onError: continueRegularOutput`); the log line says `failed (...)`.
+* "Log" is the Set node `log` field. Because no execution data is saved (see above) it is not kept; clinical-api's own audit log records the acknowledgements. A failed webhook POST does not fail the run (`onError: continueRegularOutput`); the log line says `failed (...)`.
 
 ## Configuration (n8n container environment)
 
@@ -69,7 +67,7 @@ vs-critical-alert-escalation|critical-alert-escalation
 
 After the authentication change the workflow was re-imported the same way into a fresh `vitalstream-n8n` container: `Successfully imported 1 workflow.` and `n8n list:workflow` shows it.
 
-`e2e/tests/unit/test_delivery_files.py` additionally checks that no excluded node type is used, that every connection points at an existing node, that the clinical-api request carries `Authorization: Bearer {{ $json.token }}` fed by both token sources, that the dev fetch asks for sub `n8n` with role `SERVICE`, that no JWT is committed, and that the compose n8n service passes `CLINICAL_API_TOKEN`.
+`e2e/tests/unit/test_delivery_files.py` additionally checks that no excluded node type is used, that every connection points at an existing node, that `Authorization` is set only in the clinical-api HTTP node header, read from the env token or the dev-token node, that no Set node carries a token, that the workflow saves no execution data, that the dev fetch asks for sub `n8n` with role `SERVICE`, that no JWT is committed, and that the compose n8n service passes `CLINICAL_API_TOKEN` and saves no execution data.
 
 ### Canvas screenshot (`docs/images/n8n-escalation.png`)
 

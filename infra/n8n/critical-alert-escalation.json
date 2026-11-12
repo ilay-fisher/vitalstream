@@ -86,7 +86,7 @@
             "parameters": [
               {
                 "name": "Authorization",
-                "value": "=Bearer {{ $json.token }}"
+                "value": "=Bearer {{ $env.CLINICAL_API_TOKEN || $('Fetch dev token').item.json.token }}"
               },
               {
                 "name": "X-Correlation-Id",
@@ -108,7 +108,7 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [
-          1560,
+          1300,
           200
         ],
         "retryOnFail": true,
@@ -143,7 +143,7 @@
         "type": "n8n-nodes-base.if",
         "typeVersion": 2,
         "position": [
-          1820,
+          1560,
           200
         ]
       },
@@ -163,7 +163,7 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [
-          2080,
+          1820,
           100
         ],
         "onError": "continueRegularOutput"
@@ -193,7 +193,7 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          2340,
+          2080,
           100
         ]
       },
@@ -222,13 +222,13 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          2080,
+          1820,
           320
         ]
       },
       {
         "parameters": {
-          "content": "## critical-alert-escalation\nclinical-api publishes every CRITICAL alert to RabbitMQ exchange `alerts.notify` (routing key `alert.critical`), bound to queue `notify.critical`.\nAfter `ESCALATION_WAIT_MINUTES` (default 5) the alert is re-read; if it is still OPEN it is POSTed to `ESCALATION_WEBHOOK_URL` (placeholder, no real endpoint ships).\nOnly RabbitMQ, IF, Wait, HTTP and Set nodes: executeCommand, ssh and code are disabled by NODES_EXCLUDE.\nclinical-api needs a Bearer token: `CLINICAL_API_TOKEN` (env) when set, otherwise, in dev only, a SERVICE token for sub `n8n` from `/api/v1/dev/token`. No token is stored in this file.",
+          "content": "## critical-alert-escalation\nclinical-api publishes every CRITICAL alert to RabbitMQ exchange `alerts.notify` (routing key `alert.critical`), bound to queue `notify.critical`.\nAfter `ESCALATION_WAIT_MINUTES` (default 5) the alert is re-read; if it is still OPEN it is POSTed to `ESCALATION_WEBHOOK_URL` (placeholder, no real endpoint ships).\nOnly RabbitMQ, IF, Wait, HTTP and Set nodes: executeCommand, ssh and code are disabled by NODES_EXCLUDE.\nclinical-api needs a Bearer token: `CLINICAL_API_TOKEN` (env) when set, otherwise, in dev only, a SERVICE token for sub `n8n` from `/api/v1/dev/token`. The token is read only inside that request's bearer header expression (no node copies it into item data), and the workflow saves no execution data, so neither tokens nor alert contents are stored by n8n.",
           "height": 240,
           "width": 620
         },
@@ -275,29 +275,6 @@
       },
       {
         "parameters": {
-          "assignments": {
-            "assignments": [
-              {
-                "id": "token-env",
-                "name": "token",
-                "type": "string",
-                "value": "={{ $env.CLINICAL_API_TOKEN }}"
-              }
-            ]
-          },
-          "options": {}
-        },
-        "id": "a1f0c001-0000-4000-8000-00000000000b",
-        "name": "Use configured token",
-        "type": "n8n-nodes-base.set",
-        "typeVersion": 3.4,
-        "position": [
-          1040,
-          100
-        ]
-      },
-      {
-        "parameters": {
           "method": "POST",
           "url": "={{ $env.CLINICAL_API_URL || 'http://clinical-api:8082' }}/api/v1/dev/token",
           "sendBody": true,
@@ -323,29 +300,6 @@
         "retryOnFail": true,
         "maxTries": 3,
         "waitBetweenTries": 2000
-      },
-      {
-        "parameters": {
-          "assignments": {
-            "assignments": [
-              {
-                "id": "token-dev",
-                "name": "token",
-                "type": "string",
-                "value": "={{ $json.token }}"
-              }
-            ]
-          },
-          "options": {}
-        },
-        "id": "a1f0c001-0000-4000-8000-00000000000d",
-        "name": "Token from dev endpoint",
-        "type": "n8n-nodes-base.set",
-        "typeVersion": 3.4,
-        "position": [
-          1300,
-          300
-        ]
       }
     ],
     "connections": {
@@ -427,7 +381,7 @@
         "main": [
           [
             {
-              "node": "Use configured token",
+              "node": "Get alert from clinical-api",
               "type": "main",
               "index": 0
             }
@@ -441,29 +395,7 @@
           ]
         ]
       },
-      "Use configured token": {
-        "main": [
-          [
-            {
-              "node": "Get alert from clinical-api",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
       "Fetch dev token": {
-        "main": [
-          [
-            {
-              "node": "Token from dev endpoint",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Token from dev endpoint": {
         "main": [
           [
             {
@@ -476,7 +408,10 @@
       }
     },
     "settings": {
-      "executionOrder": "v1"
+      "executionOrder": "v1",
+      "saveDataSuccessExecution": "none",
+      "saveDataErrorExecution": "none",
+      "saveManualExecutions": false
     },
     "pinData": {},
     "tags": []

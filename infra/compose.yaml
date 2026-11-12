@@ -301,6 +301,9 @@ services:
       GENERIC_TIMEZONE: UTC
       # JWT (role SERVICE) for clinical-api; empty in dev = the workflow fetches a dev token
       CLINICAL_API_TOKEN: ${CLINICAL_API_TOKEN:-}
+      # keep no execution data: it would hold bearer tokens (dev fetch) and alert contents (PHI)
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
+      EXECUTIONS_DATA_SAVE_ON_ERROR: none
     mem_limit: 512m
     volumes: [n8n-data:/home/node/.n8n]
     healthcheck:
