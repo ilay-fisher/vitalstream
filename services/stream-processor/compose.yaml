@@ -1,7 +1,8 @@
+# Fragment merged with infra/compose.yaml (see CONTRACTS section 8); paths are relative to the repo root.
 services:
   stream-processor:
     build:
-      context: .
+      context: services/stream-processor
     image: vitalstream/stream-processor:latest
     container_name: stream-processor
     depends_on:
@@ -29,11 +30,13 @@ services:
     volumes:
       - stream-processor-data:/data
     restart: unless-stopped
+    networks:
+      - vitalstream
 
 volumes:
   stream-processor-data:
 
 networks:
-  default:
+  vitalstream:
     name: vitalstream
     external: false

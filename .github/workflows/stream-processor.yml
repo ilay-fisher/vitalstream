@@ -70,7 +70,7 @@ jobs:
           path: ~/.ivy2
           key: ivy-${{ hashFiles('services/stream-processor/src/stream_processor/config.py') }}
       - run: uv sync --frozen
-      - name: Integration test (Testcontainers: Kafka, Cassandra, Redis)
+      - name: "Integration test (Testcontainers: Kafka, Cassandra, Redis)"
         run: uv run pytest -m integration -s
 
   docker:
