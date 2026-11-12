@@ -196,6 +196,38 @@ class AlertIngestServiceTest {
   }
 
   @Test
+  void staleOpenThenAFreshUpdateNotifiesExactlyOnceAndClearsTheFlag() {
+    service.ingest(hr(Severity.CRITICAL, -10), "c");
+    UUID id = alerts.all().getFirst().id();
+    assertThat(alerts.get(id).notifyPending()).isTrue();
+
+    service.ingest(hr(Severity.CRITICAL, 0), "c");
+    service.ingest(hr(Severity.CRITICAL, 1), "c");
+
+    assertThat(outboxTypesFor(id))
+        .containsExactly(
+            OutboxEventType.ALERT_INDEX,
+            OutboxEventType.ALERT_INDEX,
+            OutboxEventType.ALERT_NOTIFY,
+            OutboxEventType.ALERT_ESCALATE,
+            OutboxEventType.ALERT_INDEX);
+    assertThat(alerts.get(id).notifyPending()).isFalse();
+    assertThat(skippedAsStale()).isEqualTo(1.0);
+  }
+
+  @Test
+  void aStillStaleUpdateKeepsTheFlagWithoutASecondSkip() {
+    service.ingest(hr(Severity.HIGH, -10), "c");
+
+    service.ingest(hr(Severity.HIGH, -9), "c");
+
+    assertThat(alerts.all().getFirst().notifyPending()).isTrue();
+    assertThat(skippedAsStale()).isEqualTo(1.0);
+    assertThat(outboxTypesFor(alerts.all().getFirst().id()))
+        .containsOnly(OutboxEventType.ALERT_INDEX);
+  }
+
+  @Test
   void staleEscalationIsSkippedAndCountedOnce() {
     service.ingest(hr(Severity.MEDIUM, -10), "c");
 

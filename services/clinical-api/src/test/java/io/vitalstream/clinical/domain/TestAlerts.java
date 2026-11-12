@@ -64,6 +64,7 @@ public final class TestAlerts {
         null,
         null,
         0,
-        d.id());
+        d.id(),
+        false);
   }
 }

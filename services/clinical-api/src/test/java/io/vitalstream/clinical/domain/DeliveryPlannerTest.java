@@ -169,4 +169,69 @@ class DeliveryPlannerTest {
     assertThat(DeliveryPlanner.skippedAsStale(child, EpisodeChange.OPENED, cutoff)).isFalse();
     assertThat(DeliveryPlanner.skippedAsStale(acked, EpisodeChange.UNLINKED, cutoff)).isFalse();
   }
+
+  // ---- owed notifications: a stale skip is paid by the next fresh update ---------------------
+
+  private static final Instant FRESH_CUTOFF = TestAlerts.T0;
+
+  @Test
+  void aFreshUpdateOfAnOpenTopLevelEpisodeThatOwesAPageNotifies() {
+    Alert owing = TestAlerts.alert(Severity.CRITICAL).withNotifyPending(true);
+
+    assertThat(DeliveryPlanner.plan(owing, EpisodeChange.UPDATED, false, FRESH_CUTOFF))
+        .containsExactly(
+            OutboxEventType.ALERT_INDEX,
+            OutboxEventType.ALERT_NOTIFY,
+            OutboxEventType.ALERT_ESCALATE);
+    assertThat(DeliveryPlanner.nextNotifyPending(owing, EpisodeChange.UPDATED, FRESH_CUTOFF))
+        .isFalse();
+  }
+
+  @Test
+  void anUpdateWithoutAnOwedPageStaysQuiet() {
+    Alert alert = TestAlerts.alert(Severity.CRITICAL);
+
+    assertThat(DeliveryPlanner.notifies(alert, EpisodeChange.UPDATED, FRESH_CUTOFF)).isFalse();
+  }
+
+  @Test
+  void anAcknowledgedEpisodeNoLongerOwesAPage() {
+    Alert acked =
+        TestAlerts.alert(Severity.HIGH)
+            .withNotifyPending(true)
+            .acknowledge("dr", null, TestAlerts.T0)
+            .withNotifyPending(true);
+
+    assertThat(DeliveryPlanner.notifies(acked, EpisodeChange.UPDATED, FRESH_CUTOFF)).isFalse();
+  }
+
+  @Test
+  void aChildNeverCollectsAnOwedPage() {
+    Alert child = TestAlerts.alert(Severity.HIGH).withNotifyPending(true);
+    child = child.withParent(UUID.randomUUID()).withNotifyPending(true);
+
+    assertThat(DeliveryPlanner.notifies(child, EpisodeChange.UPDATED, FRESH_CUTOFF)).isFalse();
+  }
+
+  @Test
+  void aStillStaleUpdateKeepsOwingWithoutCountingAnotherSkip() {
+    Alert owing = TestAlerts.alert(Severity.HIGH).withNotifyPending(true);
+    Instant cutoff = cutoffAt(owing).plusSeconds(1);
+
+    assertThat(DeliveryPlanner.notifies(owing, EpisodeChange.UPDATED, cutoff)).isFalse();
+    assertThat(DeliveryPlanner.skippedAsStale(owing, EpisodeChange.UPDATED, cutoff)).isFalse();
+    assertThat(DeliveryPlanner.nextNotifyPending(owing, EpisodeChange.UPDATED, cutoff)).isTrue();
+  }
+
+  @Test
+  void aStaleSkipSetsTheFlagAndAFreshNotifyClearsIt() {
+    Alert open = TestAlerts.alert(Severity.HIGH);
+    Instant stale = cutoffAt(open).plusSeconds(1);
+
+    assertThat(DeliveryPlanner.nextNotifyPending(open, EpisodeChange.OPENED, stale)).isTrue();
+    assertThat(DeliveryPlanner.nextNotifyPending(open, EpisodeChange.OPENED, FRESH_CUTOFF))
+        .isFalse();
+    assertThat(DeliveryPlanner.nextNotifyPending(open, EpisodeChange.UPDATED, FRESH_CUTOFF))
+        .isFalse();
+  }
 }

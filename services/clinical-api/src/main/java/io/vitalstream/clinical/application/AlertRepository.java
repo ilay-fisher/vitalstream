@@ -64,6 +64,12 @@ public interface AlertRepository {
   void touch(UUID id);
 
   /**
+   * Sets or clears the owed-notification flag (CONTRACTS section 3.4, Staleness) without changing
+   * the version: the flag is internal bookkeeping and not part of the {@code AlertView}.
+   */
+  void setNotifyPending(UUID id, boolean pending);
+
+  /**
    * Resolves, in one statement, every non-resolved episode whose {@code lastSeenAt} is before
    * {@code cutoff}. A single conditional update is what makes concurrent resolvers on several
    * replicas safe: the loser re-evaluates the row and finds nothing to do.

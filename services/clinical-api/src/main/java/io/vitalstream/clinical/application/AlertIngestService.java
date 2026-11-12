@@ -173,6 +173,10 @@ public class AlertIngestService {
     for (OutboxEventType type : DeliveryPlanner.plan(stored, change, suppressed, staleBefore)) {
       effects.enqueue(type, view, correlationId);
     }
+    boolean pending = DeliveryPlanner.nextNotifyPending(stored, change, staleBefore);
+    if (pending != stored.notifyPending()) {
+      alerts.setNotifyPending(stored.id(), pending);
+    }
 
     List<AlertView> views = new ArrayList<>(List.of(view));
     for (UUID id : related) {

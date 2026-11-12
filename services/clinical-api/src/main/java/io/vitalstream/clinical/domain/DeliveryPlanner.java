@@ -12,12 +12,17 @@ public final class DeliveryPlanner {
   /**
    * Only a top-level episode that just opened or escalated may page anyone: updates, children,
    * acknowledgements and resolutions are shown live but stay quiet (CONTRACTS section 3.4). An
-   * unlinked episode pages only while still OPEN: an acknowledged one already has an owner.
-   * Independent of how recent the episode is.
+   * unlinked episode pages only while still OPEN: an acknowledged one already has an owner. An
+   * update also pages when a notification skipped as stale is still owed ({@code notifyPending}) on
+   * an OPEN episode. Independent of how recent the episode is.
    */
   private static boolean pagesWhenFresh(Alert episode, EpisodeChange change) {
     boolean owned = change == EpisodeChange.UNLINKED && episode.status() != AlertStatus.OPEN;
-    return change.mayNotify() && episode.isTopLevel() && !owned;
+    boolean owed =
+        change == EpisodeChange.UPDATED
+            && episode.notifyPending()
+            && episode.status() == AlertStatus.OPEN;
+    return (change.mayNotify() || owed) && episode.isTopLevel() && !owned;
   }
 
   /**
@@ -41,7 +46,21 @@ public final class DeliveryPlanner {
 
   /** True when the only reason this change does not page is that the episode went stale. */
   public static boolean skippedAsStale(Alert episode, EpisodeChange change, Instant staleBefore) {
-    return pagesWhenFresh(episode, change) && isStale(episode, staleBefore);
+    return change.mayNotify() && pagesWhenFresh(episode, change) && isStale(episode, staleBefore);
+  }
+
+  /**
+   * The owed-notification flag after this change: set when the notification was skipped as stale,
+   * cleared when it is sent (or deliberately held back by the suppression window), otherwise
+   * unchanged. A still-stale update of an episode that already owes a page does not count as a new
+   * skip.
+   */
+  public static boolean nextNotifyPending(
+      Alert episode, EpisodeChange change, Instant staleBefore) {
+    if (skippedAsStale(episode, change, staleBefore)) {
+      return true;
+    }
+    return !notifies(episode, change, staleBefore) && episode.notifyPending();
   }
 
   /**

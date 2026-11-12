@@ -86,6 +86,16 @@ class AlertAckServiceTest {
   }
 
   @Test
+  void acknowledgementClearsAnOwedNotification() {
+    Alert owing = TestAlerts.alert(Severity.HIGH).withNotifyPending(true);
+    alerts.seed(owing);
+
+    service.acknowledge(owing.id(), DR, null);
+
+    assertThat(alerts.get(owing.id()).notifyPending()).isFalse();
+  }
+
+  @Test
   void viewKeepsEpisodeFieldsAndChildCount() {
     Alert parent = TestAlerts.alert(Severity.HIGH);
     alerts.seed(parent);

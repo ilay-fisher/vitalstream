@@ -192,8 +192,8 @@ stateDiagram-v2
   escalates or is unlinked while OPEN. Updates, children, acks and resolutions only index and push
   live. An episode whose `lastSeenAt` is older than `now - ALERT_RESOLVE_AFTER` at that moment
   (replays, catch-up after downtime, a silent unlinked child) does not notify (equal to the
-  threshold is not stale); it is still written, pushed live and indexed, and counted in
-  `vitalstream_alert_notifications_skipped_total{reason="stale"}`. The `alert:suppress` window still applies; the episode id owns it, so an episode's own
+  threshold is not stale); it is still written, pushed live and indexed, counted in
+  `vitalstream_alert_notifications_skipped_total{reason="stale"}`, and owed: `notify_pending` is set, and the next fresh update of the still-open top-level episode pages once and clears it (an ack, linking as a child or resolution clear it too). The `alert:suppress` window still applies; the episode id owns it, so an episode's own
   escalation is never swallowed by its opening notification.
 - **Concurrency.** Kafka keys by patient, but the intake also uses version compare-and-set and the
   unique index: on a lost race the whole step is retried against fresh state (3 attempts, then the

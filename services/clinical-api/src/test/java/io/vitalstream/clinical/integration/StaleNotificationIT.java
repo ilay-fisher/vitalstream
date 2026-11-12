@@ -77,4 +77,25 @@ class StaleNotificationIT extends IntegrationTestBase {
     assertThat(outboxTypes(fresh)).containsExactly("ALERT_INDEX", "ALERT_NOTIFY");
     assertThat(rabbitMessagesFor(fresh, Duration.ofSeconds(10))).hasSize(1);
   }
+
+  @Test
+  void aStaleSkipIsPaidByTheFirstFreshUpdateExactlyOnce() throws Exception {
+    ingestService().ingest(detection("P-5003", Instant.now().minus(Duration.ofHours(1))), "c-down");
+    UUID episode = awaitSingleEpisode("P-5003");
+    assertThat(pending(episode)).isTrue();
+
+    ingestService().ingest(detection("P-5003", Instant.now()), "c-catchup");
+    ingestService().ingest(detection("P-5003", Instant.now().plusSeconds(60)), "c-catchup");
+
+    assertThat(rabbitMessagesFor(episode, Duration.ofSeconds(10))).hasSize(1);
+    assertThat(pending(episode)).isFalse();
+    assertThat(outboxTypes(episode).stream().filter("ALERT_NOTIFY"::equals).count()).isEqualTo(1L);
+  }
+
+  private boolean pending(UUID episode) {
+    return jdbc.sql("SELECT notify_pending FROM clinical.alerts WHERE id = :id")
+        .param("id", episode)
+        .query(Boolean.class)
+        .single();
+  }
 }

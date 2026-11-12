@@ -117,6 +117,11 @@ class InMemoryAlertRepository implements AlertRepository {
   }
 
   @Override
+  public void setNotifyPending(UUID id, boolean pending) {
+    rows.put(id, rows.get(id).withNotifyPending(pending));
+  }
+
+  @Override
   public void touch(UUID id) {
     Alert a = rows.get(id);
     rows.put(id, a.withVersion(a.version() + 1));

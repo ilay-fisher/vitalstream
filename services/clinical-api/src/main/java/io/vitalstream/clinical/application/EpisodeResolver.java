@@ -122,6 +122,10 @@ public class EpisodeResolver {
       for (OutboxEventType type : DeliveryPlanner.plan(stored, change, suppressed, staleBefore)) {
         effects.enqueue(type, view, correlationId);
       }
+      boolean pending = DeliveryPlanner.nextNotifyPending(stored, change, staleBefore);
+      if (pending != stored.notifyPending()) {
+        alerts.setNotifyPending(id, pending);
+      }
       if (wasUnlinked) {
         unlinkedTypes.add(stored.type());
       }
