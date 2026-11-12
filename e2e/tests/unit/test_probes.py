@@ -2,7 +2,7 @@ import json
 from datetime import UTC, datetime
 
 from vitalstream_e2e.kafka_tail import KafkaTail, Record
-from vitalstream_e2e.probes import ack_body, batch_body, find_open_alert, tool_calls
+from vitalstream_e2e.probes import ack_body, batch_body, find_open_alert, open_alerts, tool_calls
 
 
 def test_batch_body_matches_gateway_contract():
@@ -24,9 +24,15 @@ def test_batch_body_matches_gateway_contract():
     }
 
 
-def test_ack_body_names_actor_and_note():
-    assert ack_body("e2e")["by"] == "e2e"
-    assert ack_body("e2e")["note"]
+def test_ack_body_carries_only_a_note_because_the_actor_is_the_token():
+    body = ack_body()
+
+    assert set(body) == {"note"}
+    assert body["note"]
+
+
+def test_ack_body_can_smuggle_a_by_field_to_prove_it_is_ignored():
+    assert ack_body(by="mallory") == {"by": "mallory", "note": ack_body()["note"]}
 
 
 def test_find_open_alert_picks_open_alert():
@@ -39,6 +45,19 @@ def test_find_open_alert_picks_open_alert():
 
     assert find_open_alert(page)["alertId"] == "b"
     assert find_open_alert({"items": []}) is None
+
+
+def test_open_alerts_lists_every_open_alert_in_order():
+    page = {
+        "items": [
+            {"alertId": "a", "status": "ACKNOWLEDGED"},
+            {"alertId": "b", "status": "OPEN"},
+            {"alertId": "c", "status": "OPEN"},
+        ]
+    }
+
+    assert [a["alertId"] for a in open_alerts(page)] == ["b", "c"]
+    assert open_alerts({}) == []
 
 
 def test_tool_calls_keeps_completed_calls_only():
