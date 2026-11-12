@@ -124,7 +124,9 @@ async def test_chat_validates_request_with_problem_json(client: httpx.AsyncClien
     assert {e["field"] for e in body["errors"]} >= {"patientId", "message"}
 
 
-async def test_chat_failure_ends_stream_with_error_done(stack: dict[str, Any]) -> None:
+async def test_chat_failure_ends_stream_with_error_done(
+    stack: dict[str, Any], clinical_mock: respx.MockRouter
+) -> None:
     class Exploding:
         async def run(self, *_: Any) -> AsyncIterator[AgentEvent]:
             raise RuntimeError("boom")
@@ -132,7 +134,9 @@ async def test_chat_failure_ends_stream_with_error_done(stack: dict[str, Any]) -
 
     application = create_app(Settings(), make_services(stack, agent=Exploding()))
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=application), base_url="http://localhost"
+        transport=httpx.ASGITransport(app=application),
+        base_url="http://localhost",
+        headers=USER_HEADERS,
     ) as c:
         response = await c.post("/api/v1/chat", json={"message": "hi"})
     events = parse_sse(response.text)

@@ -10,12 +10,14 @@ from fastapi.responses import StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 
+from copilot.clinical import ClinicalApiError
 from copilot.correlation import get_correlation_id
 from copilot.llm.types import Message
 from copilot.metrics import CHAT_REQUESTS
 from copilot.pseudonym import patient_ref
 from copilot.security import bearer_matches
 from copilot.services import Services
+from copilot.user_context import set_user_token
 
 log = structlog.get_logger()
 router = APIRouter()
@@ -65,13 +67,48 @@ def require_admin(request: Request) -> None:
         )
 
 
+def _user_token(request: Request) -> str:
+    """The bearer token of the chat user; 401 when absent or not a Bearer credential."""
+    scheme, _, token = (request.headers.get("authorization") or "").partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(
+            status_code=401,
+            detail="Missing or invalid bearer token",
+            headers={"WWW-Authenticate": 'Bearer realm="clinical-api"'},
+        )
+    return token.strip()
+
+
+async def _authenticate_user(services: Services, token: str) -> str:
+    """Vet the token with clinical-api before any LLM or tool call; returns the user's ``sub``.
+
+    clinical-api's 401/403 is passed on with the same status; an unreachable clinical-api is a
+    503 (fail closed: no identity, no chat).
+    """
+    try:
+        identity = await services.tools.clinical.me(token)
+    except ClinicalApiError as exc:
+        if exc.status in (401, 403):
+            raise HTTPException(
+                status_code=exc.status,
+                detail="clinical-api rejected the bearer token",
+                headers={"WWW-Authenticate": 'Bearer realm="clinical-api"'}
+                if exc.status == 401
+                else None,
+            ) from exc
+        raise HTTPException(status_code=503, detail="clinical-api unavailable") from exc
+    return str(identity["sub"])
+
+
 async def _chat_stream(
-    services: Services, body: ChatRequest, pseudonym_key: str
+    services: Services, body: ChatRequest, pseudonym_key: str, token: str, sub: str
 ) -> AsyncIterator[str]:
+    # Bound inside the generator so it lives in the context the tool calls run in.
+    set_user_token(token)
     session_id = (
         body.sessionId
-        if body.sessionId and services.memory.has(body.sessionId)
-        else services.memory.create()
+        if body.sessionId and services.memory.has(body.sessionId, sub)
+        else services.memory.create(sub)
     )
     history = services.memory.get(session_id)
     correlation_id = get_correlation_id()
@@ -113,10 +150,15 @@ async def chat(body: ChatRequest, request: Request) -> StreamingResponse:
 
     Events: `token` (answer text), `tool_call` (tool started/finished), `citation`
     (guideline passage backing the answer) and a final `done` (full text, usage, ids).
-    Conversation memory is per `sessionId` and bounded by TTL and size.
+    Conversation memory is per `sessionId`, bound to the user's `sub`, and bounded by TTL and size.
+    Requires the end user's clinical-api JWT: it is validated first (401/403 are passed on and
+    nothing else runs) and then forwarded on every tool call.
     """
+    services = _services(request)
+    token = _user_token(request)
+    sub = await _authenticate_user(services, token)
     return StreamingResponse(
-        _chat_stream(_services(request), body, request.app.state.pseudonym_key),
+        _chat_stream(services, body, request.app.state.pseudonym_key, token, sub),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

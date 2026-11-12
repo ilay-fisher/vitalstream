@@ -74,7 +74,7 @@ async def test_expired_session_is_replaced_not_resurrected(
     services.memory._sessions.clear()
     app = create_app(Settings(), services)
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://localhost"
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost", headers=USER_HEADERS
     ) as c:
         r = await c.post("/api/v1/chat", json={"sessionId": sid, "message": "hello"})
     assert parse_sse(r.text)[0][1]["sessionId"] != sid

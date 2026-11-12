@@ -27,7 +27,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy --strict src
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/api/v1/chat` | `{"sessionId"?,"patientId"?,"message"}` -> SSE: `session`, `token`, `tool_call`, `citation`, `done` |
+| POST | `/api/v1/chat` | needs `Authorization: Bearer <user clinical-api JWT>` (401/403 as problem+json, 503 if clinical-api is down). `{"sessionId"?,"patientId"?,"message"}` -> SSE: `session`, `token`, `tool_call`, `citation`, `done` |
 | POST | `/api/v1/documents` | **Bearer `COPILOT_ADMIN_TOKEN`**. `{"documents":[{"title"?,"source"?,"content"}]}` markdown -> 201; stored with provenance `api-upload` |
 | GET | `/api/v1/documents/search?q=&k=` | hybrid search debug view incl. per-side ranks |
 | POST | `/mcp` | **Bearer `MCP_TOKEN`**; MCP streamable HTTP (stateless, JSON responses) |
@@ -128,7 +128,7 @@ Security (CONTRACTS §4.1): every `/mcp` request needs `Authorization: Bearer $M
 | `POSTGRES_URL` | `postgresql://vitalstream:vitalstream@localhost:5433/vitalstream` | schema `copilot`, migrated with Alembic at startup |
 | `ELASTICSEARCH_URL` | `http://localhost:9200` | BM25 index `guidelines` (`ES_INDEX`) |
 | `CLINICAL_API_URL` | `http://localhost:8082` | vitals and alerts |
-| `CLINICAL_API_TOKEN` | unset | bearer JWT (role `SERVICE`) for clinical-api. Unset in `dev`: the copilot requests one for `sub` `copilot` from clinical-api's dev token endpoint, caches it and renews it 60 s before expiry. Outside `dev` it is required (startup fails if empty or < 32 chars) |
+| `CLINICAL_API_TOKEN` | unset | bearer JWT (role `SERVICE`) for clinical-api, used by the `/mcp` tools only. Unset in `dev`: the copilot requests one for `sub` `copilot-mcp` from clinical-api's dev token endpoint, caches it and renews it 60 s before expiry. Outside `dev` it is required (startup fails if empty or < 32 chars) |
 | `COPILOT_ADMIN_TOKEN` / `MCP_TOKEN` | `dev-admin-token` / `dev-mcp-token` | bearer tokens (constant-time compare); override outside local dev |
 | `ALLOWED_HOSTS` | `localhost,127.0.0.1,copilot` | Host-header allowlist on every route (400 otherwise) |
 | `APP_ENV` | `dev` | anything else makes startup fail if the admin/MCP tokens, pseudonym key, `CLINICAL_API_TOKEN` or DB password are empty, dev defaults or < 32 chars; `dev` logs one WARN "running with dev secrets" |
@@ -157,6 +157,8 @@ Security (CONTRACTS §4.1): every `/mcp` request needs `Authorization: Bearer $M
 
 * Tools are implemented once (`copilot.tools`) and consumed by both the agent and the MCP server, so behaviour and metrics cannot drift.
 * Business logic depends on small ports (`Embedder`, `VectorIndex`, `KeywordIndex`, `DocumentStore`, `LLMProvider`), which keeps unit tests free of Docker and model downloads.
-* clinical-api is secured (CONTRACTS 4.2): every call carries `Authorization: Bearer <service token>` (`src/copilot/clinical_auth.py`). A 401 invalidates the cached token and retries once; a static `CLINICAL_API_TOKEN` cannot be renewed, so rotating it means restarting. The MCP tools and the agent use the same client, so they work unchanged against the secured API. The copilot reads with a `SERVICE` identity and cannot acknowledge alerts.
+* clinical-api is secured (CONTRACTS 4.2) and the copilot never acts with more authority than its caller:
+  * Chat: the user's own JWT is required. Before any LLM or tool call it is checked with clinical-api `GET /api/v1/me` (401/403 are returned unchanged, no LLM call). Every tool call in that chat forwards the same token, kept in a contextvar (`src/copilot/user_context.py`), never in the prompt, tool arguments, events or logs. Sessions are bound to the token's `sub`; a `sessionId` from another user gets a new session.
+  * `/mcp`: no end user, so a separate client uses the `SERVICE` token (`CLINICAL_API_TOKEN`, or in `dev` a `copilot-mcp` token from the dev endpoint; 401 invalidates it and retries once; a static token needs a restart to rotate). The two clients share no credential. The copilot cannot acknowledge alerts.
 * clinical-api response shapes are not specified in CONTRACTS; the client accepts either a bare array or a page object (`content`/`items`/...) and reads AlertView / vital fields by the names in §3.
 * Observability: JSON logs with `service` and `correlationId`, `/metrics` with chat requests, tool calls by name, retrieval latency, LLM latency and tokens.

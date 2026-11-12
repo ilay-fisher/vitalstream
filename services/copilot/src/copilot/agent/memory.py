@@ -28,22 +28,23 @@ class ConversationMemory:
         self._max_sessions = max_sessions
         self._max_messages = max_messages
         self._clock = clock
-        self._sessions: OrderedDict[str, tuple[float, list[Message]]] = OrderedDict()
+        self._sessions: OrderedDict[str, tuple[float, list[Message], str]] = OrderedDict()
 
     def __len__(self) -> int:
         self._purge()
         return len(self._sessions)
 
-    def create(self) -> str:
-        """Issue a new unguessable (128-bit) session id and register it."""
+    def create(self, owner: str = "") -> str:
+        """Issue a new unguessable (128-bit) session id owned by ``owner`` (the user's ``sub``)."""
         session_id = secrets.token_hex(16)
-        self.append(session_id, [])
+        self.append(session_id, [], owner)
         return session_id
 
-    def has(self, session_id: str) -> bool:
-        """True only for ids this memory issued that have not expired or been evicted."""
+    def has(self, session_id: str, owner: str = "") -> bool:
+        """True only for ids issued to ``owner`` that have not expired or been evicted."""
         self._purge()
-        return session_id in self._sessions
+        entry = self._sessions.get(session_id)
+        return entry is not None and entry[2] == owner
 
     def get(self, session_id: str) -> list[Message]:
         """A copy of the session history (empty if unknown or expired)."""
@@ -54,20 +55,22 @@ class ConversationMemory:
         self._sessions.move_to_end(session_id)
         return list(entry[1])
 
-    def append(self, session_id: str, messages: list[Message]) -> None:
+    def append(self, session_id: str, messages: list[Message], owner: str = "") -> None:
         """Add messages to a session, refreshing its TTL and enforcing the bounds."""
         self._purge()
-        history = [*self._sessions.get(session_id, (0.0, []))[1], *messages]
+        existing = self._sessions.get(session_id)
+        owner = existing[2] if existing else owner
+        history = [*(existing[1] if existing else []), *messages]
         history = history[-self._max_messages :]
         while history and history[0].role != "user":
             history.pop(0)
-        self._sessions[session_id] = (self._clock() + self._ttl, history)
+        self._sessions[session_id] = (self._clock() + self._ttl, history, owner)
         self._sessions.move_to_end(session_id)
         while len(self._sessions) > self._max_sessions:
             self._sessions.popitem(last=False)
 
     def _purge(self) -> None:
         now = self._clock()
-        expired = [sid for sid, (expires, _) in self._sessions.items() if expires <= now]
+        expired = [sid for sid, (expires, _, _) in self._sessions.items() if expires <= now]
         for sid in expired:
             del self._sessions[sid]

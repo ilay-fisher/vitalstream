@@ -274,7 +274,9 @@ async def test_client_me_returns_the_identity_and_reports_the_status() -> None:
     with respx.mock(assert_all_called=False) as router:
         route = router.get(f"{BASE}/api/v1/me")
         route.mock(
-            return_value=httpx.Response(200, json={"sub": "observer", "name": "O", "roles": ["VIEWER"]})
+            return_value=httpx.Response(
+                200, json={"sub": "observer", "name": "O", "roles": ["VIEWER"]}
+            )
         )
         assert (await client.me("tok-1"))["sub"] == "observer"
         assert route.calls.last.request.headers["Authorization"] == "Bearer tok-1"

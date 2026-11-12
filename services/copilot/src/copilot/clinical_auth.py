@@ -1,9 +1,12 @@
-"""Service identity for calling clinical-api (CONTRACTS §4.2).
+"""Identities for calling clinical-api (CONTRACTS §4.2).
 
-clinical-api requires a bearer JWT. The copilot uses ``CLINICAL_API_TOKEN`` when it is set (the
-production path, a token minted by the identity provider for a ``SERVICE`` client). In ``dev``
-only, it asks the dev token endpoint for a ``SERVICE`` token for ``sub`` ``copilot`` and renews it
-shortly before it expires. The token is never logged.
+* Chat: the end user's own token (:class:`UserTokenProvider`), so clinical-api enforces that user's
+  access and the copilot is never a confused deputy.
+* ``/mcp`` (no end user): a ``SERVICE`` token. ``CLINICAL_API_TOKEN`` when set (production); in
+  ``dev`` only, one for ``sub`` ``copilot-mcp`` from the dev token endpoint, renewed shortly before
+  it expires. The SERVICE identity is used by the MCP tools only.
+
+Tokens are never logged.
 """
 
 import asyncio
@@ -15,13 +18,14 @@ import structlog
 
 from copilot.clinical import ClinicalApiError, TokenProvider
 from copilot.config import Settings
+from copilot.user_context import get_user_token
 
 log = structlog.get_logger()
 
 #: A token is renewed this long before it expires, so a request never carries a dying token.
 REFRESH_MARGIN = timedelta(seconds=60)
 _DEV_TOKEN_PATH = "/api/v1/dev/token"
-_SERVICE_IDENTITY = {"sub": "copilot", "name": "Copilot", "roles": ["SERVICE"]}
+_SERVICE_IDENTITY = {"sub": "copilot-mcp", "name": "Copilot MCP", "roles": ["SERVICE"]}
 
 
 class StaticTokenProvider:
@@ -36,6 +40,24 @@ class StaticTokenProvider:
 
     def invalidate(self) -> None:
         """Nothing to refresh: a static token cannot be renewed."""
+
+
+class UserTokenProvider:
+    """The end user's token of the chat request in progress (see :mod:`copilot.user_context`).
+
+    Fails closed: with no user token in context there is no fallback to a service identity, so a
+    tool call outside an authenticated chat cannot read anything.
+    """
+
+    async def token(self) -> str:
+        """The current user's token."""
+        token = get_user_token()
+        if not token:
+            raise ClinicalApiError("no user token in the request context")
+        return token
+
+    def invalidate(self) -> None:
+        """Nothing to refresh: the user's own token cannot be renewed by the copilot."""
 
 
 class DevTokenProvider:

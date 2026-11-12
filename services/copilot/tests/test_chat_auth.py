@@ -1,4 +1,4 @@
-"""Chat is authenticated as the end user and tools act with that user's token (no confused deputy)."""
+"""Chat authenticates the end user; tools act with that user's token (no confused deputy)."""
 
 import asyncio
 from typing import Any
@@ -145,7 +145,9 @@ async def test_concurrent_chats_never_mix_tokens(
             )
         )
     seen = [c.request.headers["Authorization"] for c in routes["vitals"].calls]
-    assert sorted(seen) == sorted(f"Bearer {t}" for t in ("tok-levi", "tok-observer", "tok-cohen") * 3)
+    assert sorted(seen) == sorted(
+        f"Bearer {t}" for t in ("tok-levi", "tok-observer", "tok-cohen") * 3
+    )
 
 
 async def test_session_is_bound_to_the_sub(
@@ -197,4 +199,3 @@ async def test_user_token_context_is_reset_after_the_request(
     async with client:
         await client.post("/api/v1/chat", json=CHAT, headers=bearer("tok-levi"))
     assert get_user_token() is None
-

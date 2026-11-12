@@ -1,6 +1,6 @@
 """Shared fixtures: a fully in-memory copilot stack with clinical-api mocked by respx."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import httpx

@@ -15,9 +15,10 @@ _LIST_KEYS = ("content", "items", "points", "vitals", "readings", "data", "alert
 class ClinicalApiError(Exception):
     """clinical-api could not satisfy a request."""
 
-    def __init__(self, message: str, *, not_found: bool = False) -> None:
+    def __init__(self, message: str, *, not_found: bool = False, status: int | None = None) -> None:
         super().__init__(message)
         self.not_found = not_found
+        self.status = status
 
 
 class TokenProvider(Protocol):
@@ -63,6 +64,30 @@ class ClinicalApiClient:
         """Release the connection pool."""
         await self._client.aclose()
 
+    async def me(self, token: str) -> dict[str, Any]:
+        """Identity behind ``token`` (``GET /api/v1/me``), used to vet a user before any work.
+
+        Raises :class:`ClinicalApiError` carrying clinical-api's status (401/403) when it rejects
+        the token, or ``status=None`` when clinical-api cannot be reached.
+        """
+        headers = {"Authorization": f"Bearer {token}"}
+        if correlation_id := get_correlation_id():
+            headers[CORRELATION_HEADER] = correlation_id
+        try:
+            response = await self._client.get("/api/v1/me", headers=headers)
+        except httpx.HTTPError as exc:
+            log.warning("clinical_api_unreachable", endpoint="me", error=type(exc).__name__)
+            raise ClinicalApiError("clinical-api unavailable") from exc
+        if response.status_code >= 400:
+            raise ClinicalApiError(
+                f"clinical-api rejected the token (HTTP {response.status_code})",
+                status=response.status_code,
+            )
+        body = response.json()
+        if not isinstance(body, dict) or not isinstance(body.get("sub"), str):
+            raise ClinicalApiError("clinical-api returned an unusable identity")
+        return body
+
     async def vitals(self, patient_id: str, minutes: int) -> list[dict[str, Any]]:
         """Raw vitals of the last ``minutes`` minutes for a patient."""
         now = datetime.now(UTC)
@@ -93,10 +118,13 @@ class ClinicalApiClient:
             self._tokens.invalidate()
             response = await self._send(path, endpoint, params)
         if response.status_code == 404:
-            raise ClinicalApiError("resource not found in clinical-api", not_found=True)
+            raise ClinicalApiError("resource not found in clinical-api", not_found=True, status=404)
         if response.status_code >= 400:
             log.warning("clinical_api_error", endpoint=endpoint, status=response.status_code)
-            raise ClinicalApiError(f"clinical-api unavailable (HTTP {response.status_code})")
+            raise ClinicalApiError(
+                f"clinical-api unavailable (HTTP {response.status_code})",
+                status=response.status_code,
+            )
         return response.json()
 
     async def _send(self, path: str, endpoint: str, params: dict[str, Any]) -> httpx.Response:
