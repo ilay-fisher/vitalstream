@@ -9,7 +9,12 @@ interface MockState {
   alerts: AlertView[];
   streamIntervalMs: number;
   tokenDelayMs: number;
+  /** Episode counter for scripted live episodes. */
   nextAlert: number;
+  /** Position in the scripted live-episode lifecycle (see `scriptedEvent`). */
+  streamStep: number;
+  /** Id of the scripted episode currently running. */
+  liveEpisode: string | null;
 }
 
 /** Tuning knobs for demos and e2e: `?streamMs=1500&tokenMs=100` on the page URL. */
@@ -24,6 +29,8 @@ export const mockState: MockState = {
   streamIntervalMs: pageParam('streamMs', 7000),
   tokenDelayMs: pageParam('tokenMs', 45),
   nextAlert: 100,
+  streamStep: 0,
+  liveEpisode: null,
 };
 
 export function resetMockState(overrides: Partial<MockState> = {}): void {
@@ -32,6 +39,8 @@ export function resetMockState(overrides: Partial<MockState> = {}): void {
     streamIntervalMs: 7000,
     tokenDelayMs: 45,
     nextAlert: 100,
+    streamStep: 0,
+    liveEpisode: null,
     ...overrides,
   });
 }
@@ -54,17 +63,26 @@ const encoder = new TextEncoder();
 const sse = (event: string, data: unknown) =>
   encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
-function sseResponse(start: (push: (e: string, d: unknown) => void, close: () => void) => void) {
+type Push = (event: string, data: unknown) => void;
+
+/** `start` may return a cleanup that runs when the client disconnects or `close` is called. */
+function sseResponse(start: (push: Push, close: () => void) => (() => void) | void) {
   let closed = false;
+  let cleanup: (() => void) | void;
+  const finish = () => {
+    closed = true;
+    if (cleanup) cleanup();
+    cleanup = undefined;
+  };
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(encoder.encode(': connected\n\n'));
-      start(
+      cleanup = start(
         (e, d) => {
           if (!closed) controller.enqueue(sse(e, d));
         },
         () => {
-          closed = true;
+          finish();
           try {
             controller.close();
           } catch {
@@ -73,63 +91,131 @@ function sseResponse(start: (push: (e: string, d: unknown) => void, close: () =>
         },
       );
     },
-    cancel() {
-      closed = true;
-    },
+    cancel: finish,
   });
   return new HttpResponse(stream, {
     headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
   });
 }
 
-const LIVE_TEMPLATES: Array<
-  Pick<AlertView, 'patientId' | 'type' | 'severity' | 'message' | 'metric' | 'value' | 'score'>
-> = [
+/** Connected alert streams; `emitEpisode` fans out to all of them (tests, demos). */
+const streamListeners = new Set<Push>();
+
+const SEVERITY_UP: Record<AlertView['severity'], AlertView['severity']> = {
+  LOW: 'MEDIUM',
+  MEDIUM: 'HIGH',
+  HIGH: 'CRITICAL',
+  CRITICAL: 'CRITICAL',
+};
+
+/**
+ * Stores `alert` as the current state of its episode (insert or replace) and pushes it to every
+ * connected alert stream, the way clinical-api emits `event: alert` on each episode change.
+ */
+export function emitEpisode(alert: AlertView): AlertView {
+  const index = mockState.alerts.findIndex((a) => a.alertId === alert.alertId);
+  if (index === -1) mockState.alerts.unshift(alert);
+  else mockState.alerts[index] = alert;
+  streamListeners.forEach((push) => push('alert', alert));
+  return alert;
+}
+
+/** Applies `changes` to a stored episode, bumps its version and emits it. */
+export function updateEpisode(alertId: string, changes: Partial<AlertView>): AlertView {
+  const current = mockState.alerts.find((a) => a.alertId === alertId);
+  if (!current) throw new Error(`unknown episode ${alertId}`);
+  return emitEpisode({ ...current, ...changes, version: (current.version ?? 0) + 1 });
+}
+
+const LIVE_TEMPLATES: Array<{
+  patientId: string;
+  type: AlertView['type'];
+  severity: AlertView['severity'];
+  metric: Metric;
+  value: number;
+  label: string;
+}> = [
+  {
+    patientId: 'P-0009',
+    type: 'THRESHOLD',
+    severity: 'MEDIUM',
+    metric: 'HEART_RATE',
+    value: 118,
+    label: 'Heart rate',
+  },
   {
     patientId: 'P-0007',
     type: 'THRESHOLD',
-    severity: 'CRITICAL',
-    message: 'SpO2 86 % is below the critical limit (90)',
-    metric: 'SPO2',
-    value: 86,
-    score: null,
-  },
-  {
-    patientId: 'P-0012',
-    type: 'NEWS2',
-    severity: 'CRITICAL',
-    message: 'NEWS2 score 7 (RR 24, HR 118, Temp 38.7)',
-    metric: null,
-    value: null,
-    score: 7,
-  },
-  {
-    patientId: 'P-0009',
-    type: 'TREND_ZSCORE',
     severity: 'HIGH',
-    message: 'Heart rate 126 deviates from the recent trend (z = 3.4)',
-    metric: 'HEART_RATE',
-    value: 126,
-    score: 3.4,
+    metric: 'SPO2',
+    value: 91,
+    label: 'SpO2',
   },
 ];
 
-function liveAlert(): AlertView {
-  const template = LIVE_TEMPLATES[mockState.nextAlert % LIVE_TEMPLATES.length];
+const STEPS_PER_EPISODE = 6;
+
+/**
+ * One step of a scripted episode so the live feed shows the whole lifecycle for a single
+ * alertId: open, update, update, escalation, update, resolve, then the next episode.
+ */
+function scriptedEvent(): AlertView {
+  const step = mockState.streamStep++;
+  const phase = step % STEPS_PER_EPISODE;
+  const template = LIVE_TEMPLATES[Math.floor(step / STEPS_PER_EPISODE) % LIVE_TEMPLATES.length];
   const now = Date.now();
-  const alert: AlertView = {
-    ...template,
-    alertId: `00000000-0000-4000-8000-${String(mockState.nextAlert++).padStart(12, '0')}`,
+  const stamp = {
     windowStart: new Date(now - 62_000).toISOString(),
     windowEnd: new Date(now - 2_000).toISOString(),
     detectedAt: new Date(now).toISOString(),
-    status: 'OPEN',
-    acknowledgedBy: null,
-    acknowledgedAt: null,
-    version: 0,
+    lastSeenAt: new Date(now - 2_000).toISOString(),
   };
-  mockState.alerts.unshift(alert);
-  return alert;
+  if (phase === 0) {
+    const n = mockState.nextAlert++;
+    const alertId = `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    mockState.liveEpisode = alertId;
+    return emitEpisode({
+      alertId,
+      patientId: template.patientId,
+      type: template.type,
+      severity: template.severity,
+      metric: template.metric,
+      value: template.value,
+      score: null,
+      message: `${template.label} ${template.value} is outside the normal range`,
+      status: 'OPEN',
+      acknowledgedBy: null,
+      acknowledgedAt: null,
+      version: 0,
+      firstSeenAt: stamp.windowStart,
+      occurrences: 1,
+      resolvedAt: null,
+      parentAlertId: null,
+      childCount: 0,
+      lastDetectionId: `live-${n}-0`,
+      ...stamp,
+    });
+  }
+  const current = mockState.alerts.find((a) => a.alertId === mockState.liveEpisode);
+  if (!current) {
+    mockState.streamStep += STEPS_PER_EPISODE - phase;
+    return scriptedEvent();
+  }
+  if (phase === STEPS_PER_EPISODE - 1) {
+    return updateEpisode(current.alertId, {
+      status: 'RESOLVED',
+      resolvedAt: new Date(now).toISOString(),
+    });
+  }
+  const value = (current.value ?? template.value) + (template.metric === 'SPO2' ? -1 : 3);
+  return updateEpisode(current.alertId, {
+    ...stamp,
+    value,
+    message: `${template.label} ${value} is outside the normal range`,
+    occurrences: current.occurrences + 1,
+    severity: phase === 3 ? SEVERITY_UP[current.severity] : current.severity,
+    ...(phase === 3 ? { status: 'OPEN' as const } : {}),
+  });
 }
 
 const COPILOT_ANSWER =
@@ -229,12 +315,14 @@ export const handlers = [
     const denied = authorize(request);
     if (denied instanceof Response) return denied;
     return sseResponse((push, close) => {
-      const timer = setInterval(() => push('alert', liveAlert()), mockState.streamIntervalMs);
-      // Stop producing once the client goes away (cancel flips `closed`; the next push is a no-op).
-      setTimeout(() => {
+      streamListeners.add(push);
+      const timer = setInterval(() => scriptedEvent(), mockState.streamIntervalMs);
+      const stop = setTimeout(close, 10 * 60_000);
+      return () => {
+        streamListeners.delete(push);
         clearInterval(timer);
-        close();
-      }, 10 * 60_000);
+        clearTimeout(stop);
+      };
     });
   }),
 
@@ -252,15 +340,20 @@ export const handlers = [
     if (denied instanceof Response) return denied;
     const url = new URL(request.url);
     const q = (url.searchParams.get('q') ?? '').toLowerCase();
-    const filter = (key: keyof AlertView) => url.searchParams.get(key) ?? undefined;
-    const items = mockState.alerts.filter(
-      (a) =>
-        (!filter('patientId') || a.patientId === filter('patientId')) &&
-        (!filter('severity') || a.severity === filter('severity')) &&
-        (!filter('type') || a.type === filter('type')) &&
-        (!filter('status') || a.status === filter('status')) &&
-        (!q || `${a.message} ${a.patientId}`.toLowerCase().includes(q)),
-    );
+    const statuses = url.searchParams.getAll('status');
+    const param = (key: string) => url.searchParams.get(key) ?? undefined;
+    const items = mockState.alerts
+      .filter(
+        (a) =>
+          (!param('patientId') || a.patientId === param('patientId')) &&
+          (!param('severity') || a.severity === param('severity')) &&
+          (!param('type') || a.type === param('type')) &&
+          (statuses.length === 0 || statuses.includes(a.status)) &&
+          (param('topLevel') !== 'true' || a.parentAlertId === null) &&
+          (!param('parentAlertId') || a.parentAlertId === param('parentAlertId')) &&
+          (!q || `${a.message} ${a.patientId}`.toLowerCase().includes(q)),
+      )
+      .sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt));
     await delay(80);
     return HttpResponse.json({
       items,
@@ -281,7 +374,8 @@ export const handlers = [
     await delay(150);
     if (alert.alertId === CONFLICT_ALERT_ID || alert.status !== 'OPEN') {
       if (alert.alertId === CONFLICT_ALERT_ID) {
-        Object.assign(alert, {
+        emitEpisode({
+          ...alert,
           status: 'ACKNOWLEDGED',
           acknowledgedBy: 'dr.levi',
           acknowledgedAt: new Date().toISOString(),
@@ -293,14 +387,16 @@ export const handlers = [
         { status: 409, headers: { 'Content-Type': 'application/problem+json' } },
       );
     }
-    Object.assign(alert, {
-      status: 'ACKNOWLEDGED',
-      acknowledgedBy: actor.name ?? actor.sub,
-      acknowledgementNote: body.note ?? null,
-      acknowledgedAt: new Date().toISOString(),
-      version: (alert.version ?? 0) + 1,
-    });
-    return HttpResponse.json(alert);
+    return HttpResponse.json(
+      emitEpisode({
+        ...alert,
+        status: 'ACKNOWLEDGED',
+        acknowledgedBy: actor.name ?? actor.sub,
+        acknowledgementNote: body.note ?? null,
+        acknowledgedAt: new Date().toISOString(),
+        version: (alert.version ?? 0) + 1,
+      }),
+    );
   }),
 
   http.post('*/copilot-api/api/v1/chat', async ({ request }) => {

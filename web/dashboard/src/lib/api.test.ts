@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from '../test/server';
-import { ApiError, createApi, newCorrelationId, normalizePoint } from './api';
+import { ApiError, createApi, newCorrelationId, normalizeAlert, normalizePoint } from './api';
 
 const api = createApi();
 
@@ -107,6 +107,74 @@ describe('createApi', () => {
       severity: 'HIGH',
       status: 'OPEN',
       acknowledgementNote: 'n',
+    });
+  });
+
+  it('sends status repeated and the episode filters (CONTRACTS 4)', async () => {
+    let url: URL | undefined;
+    server.use(
+      http.get('*/clinical-api/api/v1/alerts', ({ request }) => {
+        url = new URL(request.url);
+        return HttpResponse.json({ items: [], totalElements: 0 });
+      }),
+    );
+    await api.listAlerts({
+      status: ['OPEN', 'ACKNOWLEDGED'],
+      topLevel: true,
+      parentAlertId: 'p-1',
+      type: 'NEWS2',
+    });
+    expect(url?.searchParams.getAll('status')).toEqual(['OPEN', 'ACKNOWLEDGED']);
+    expect(url?.searchParams.get('topLevel')).toBe('true');
+    expect(url?.searchParams.get('parentAlertId')).toBe('p-1');
+    expect(url?.searchParams.get('type')).toBe('NEWS2');
+  });
+
+  it('reads the episode fields of an AlertView', async () => {
+    server.use(
+      http.get('*/clinical-api/api/v1/alerts', () =>
+        HttpResponse.json({
+          items: [
+            {
+              alertId: 'e1',
+              firstSeenAt: '2026-11-11T10:00:00Z',
+              lastSeenAt: '2026-11-11T10:12:00Z',
+              occurrences: 13,
+              resolvedAt: '2026-11-11T10:20:00Z',
+              parentAlertId: 'n1',
+              childCount: 2,
+              lastDetectionId: 'd9',
+            },
+          ],
+        }),
+      ),
+    );
+    const [alert] = (await api.listAlerts()).items;
+    expect(alert).toMatchObject({
+      firstSeenAt: '2026-11-11T10:00:00Z',
+      lastSeenAt: '2026-11-11T10:12:00Z',
+      occurrences: 13,
+      resolvedAt: '2026-11-11T10:20:00Z',
+      parentAlertId: 'n1',
+      childCount: 2,
+      lastDetectionId: 'd9',
+    });
+  });
+
+  it('defaults the episode fields for a pre-episode alert', () => {
+    expect(
+      normalizeAlert({
+        alertId: 'a',
+        detectedAt: '2026-11-11T10:00:00Z',
+        windowEnd: '2026-11-11T10:00:58Z',
+      }),
+    ).toMatchObject({
+      firstSeenAt: '2026-11-11T10:00:00Z',
+      lastSeenAt: '2026-11-11T10:00:58Z',
+      occurrences: 1,
+      resolvedAt: null,
+      parentAlertId: null,
+      childCount: 0,
     });
   });
 
