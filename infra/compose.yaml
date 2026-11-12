@@ -291,7 +291,7 @@ services:
 
   # ---------------------------------------------------------------- n8n (profile tools)
   n8n:
-    image: n8nio/n8n:1.64.3
+    image: n8nio/n8n:1.123.94@sha256:b2bbe8c06bf2fdec866203e7593cb6bd91e56fef03785f06d22dc442c6c74ba9
     container_name: vitalstream-n8n
     profiles: [tools]
     environment:
