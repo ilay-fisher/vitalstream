@@ -35,7 +35,7 @@ def test_build_context_is_the_fragment_directory(fragment):
 
 @pytest.mark.parametrize("fragment", FRAGMENTS)
 def test_fragment_does_not_redefine_shared_network_as_default(fragment):
-    """The external network is keyed `vitalstream`; naming it under `default` makes compose reject it."""
+    """The external network is keyed `vitalstream`; `default` makes compose reject it."""
     networks = load(fragment).get("networks", {})
 
     assert "default" not in networks
@@ -44,8 +44,15 @@ def test_fragment_does_not_redefine_shared_network_as_default(fragment):
 # Healthchecks that predate this rule and are verified healthy on Colima with `localhost`
 # (their servers listen on both stacks). New or changed healthchecks must use 127.0.0.1.
 LOCALHOST_GRANDFATHERED = {
-    "kafka", "kafka-exporter", "kafka-ui", "elasticsearch", "kibana", "localstack",
-    "prometheus", "grafana", "ingest-gateway",
+    "kafka",
+    "kafka-exporter",
+    "kafka-ui",
+    "elasticsearch",
+    "kibana",
+    "localstack",
+    "prometheus",
+    "grafana",
+    "ingest-gateway",
 }
 
 
@@ -78,7 +85,14 @@ def test_n8n_healthchecks_use_ipv4_loopback(service):
 def up_recipe() -> str:
     lines = (REPO / "Makefile").read_text().splitlines()
     start = next(i for i, line in enumerate(lines) if line.startswith("up:"))
-    end = next((i for i in range(start + 1, len(lines)) if lines[i] and not lines[i].startswith(("\t", "#"))), len(lines))
+    end = next(
+        (
+            i
+            for i in range(start + 1, len(lines))
+            if lines[i] and not lines[i].startswith(("\t", "#"))
+        ),
+        len(lines),
+    )
     return "\n".join(lines[start:end])
 
 
@@ -95,3 +109,18 @@ def test_up_waits_only_on_non_init_services():
 
 def test_up_checks_init_containers_exit_code():
     assert "docker wait" in up_recipe()
+
+
+WORKFLOWS = sorted(
+    p.relative_to(REPO).as_posix() for p in (REPO / ".github" / "workflows").glob("*.yml")
+)
+
+
+@pytest.mark.parametrize("workflow", WORKFLOWS)
+def test_workflow_is_valid_yaml_with_triggers_and_jobs(workflow):
+    """An unquoted `: ` in a step name makes the whole workflow fail at startup with 0 jobs."""
+    parsed = load(workflow)
+
+    # PyYAML reads the bare key `on` as boolean True (YAML 1.1).
+    assert "on" in parsed or True in parsed
+    assert parsed["jobs"]
