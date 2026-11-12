@@ -71,11 +71,17 @@ After the authentication change the workflow was re-imported the same way into a
 
 ### Canvas screenshot (`docs/images/n8n-escalation.png`)
 
-Not captured yet. n8n 1.x only renders the editor (and its `/workflows/demo` view) after the owner account exists, and creating that account is a manual step: open `http://127.0.0.1:5678` (Caddy basic auth, then the owner form), open the imported workflow, and capture it, for example with Playwright:
+![n8n critical alert escalation workflow](../../docs/images/n8n-escalation.png)
 
-```js
-await page.goto('http://127.0.0.1:5678/workflow/vs-critical-alert-escalation');
-await page.screenshot({ path: 'docs/images/n8n-escalation.png' });
+Captured 2026-11-12 from the imported workflow in a local n8n 1.64.3. n8n only renders the editor after an owner account exists. For local use, keep a throwaway login in a gitignored `infra/n8n/.env` (the root `.gitignore` covers `.env`), with generated values and never a real password:
+
+```bash
+N8N_PROXY_USER=admin
+N8N_PROXY_PASSWORD=<generated>
+N8N_OWNER_EMAIL=owner@vitalstream.test
+N8N_OWNER_FIRST_NAME=Local
+N8N_OWNER_LAST_NAME=Owner
+N8N_OWNER_PASSWORD=<generated, 8+ chars, a digit and an uppercase letter>
 ```
 
-Note for local Colima setups: the n8n healthcheck in `infra/compose.yaml` calls `localhost`, which can resolve to `::1` while n8n listens on IPv4 only, so the container shows `unhealthy` (and `n8n-proxy`, which waits for it, does not start) even though `http://127.0.0.1:5678/healthz` answers `ok`.
+Then, with `set -a; . infra/n8n/.env; set +a`, start n8n (`make infra-up PROFILES=tools`), import as above, and create the owner once through the proxy: `POST http://127.0.0.1:5678/rest/owner/setup` with `{"email","firstName","lastName","password"}` and the proxy basic auth. The screenshot is a Playwright page at 1440x900 with `httpCredentials` for the proxy, `POST /rest/login` with `{"email","password"}`, then `/workflow/vs-critical-alert-escalation` and Zoom to Fit.

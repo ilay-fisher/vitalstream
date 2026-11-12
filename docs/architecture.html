@@ -515,6 +515,7 @@ flowchart LR
     <figure><img src="images/dashboard-copilot-live.png" alt="Copilot panel answering with cited NEWS2 guideline chunks" loading="lazy" width="1440" height="900"><figcaption>Copilot against the real service: cited guideline chunks and token usage.</figcaption></figure>
     <figure><img src="images/dashboard-signin.png" alt="Dev sign-in screen with a choice of clinician or viewer identity" loading="lazy" width="1440" height="900"><figcaption>Dev sign-in: three demo users; the dashboard gets an 8-hour JWT from clinical-api's dev-only token endpoint and keeps it for that tab only.</figcaption></figure>
     <figure><img src="images/dashboard-alerts-viewer.png" alt="Alert feed signed in as a viewer: acknowledge buttons disabled, acknowledged rows show the clinician's name" loading="lazy" width="1440" height="900"><figcaption>Signed in as a viewer: acknowledge is disabled, and each ack shows the name taken from the clinician's token.</figcaption></figure>
+    <figure><img src="images/n8n-escalation.png" alt="n8n canvas: RabbitMQ trigger, severity check, wait, token choice, re-read alert from clinical-api, escalate if still open" loading="lazy" width="1440" height="900"><figcaption>n8n escalation: a CRITICAL alert waits for acknowledgement, is re-read from clinical-api with a bearer token, and escalates only if still open.</figcaption></figure>
   </div>
 </section>
 
