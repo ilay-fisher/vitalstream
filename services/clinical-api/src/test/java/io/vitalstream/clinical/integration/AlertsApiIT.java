@@ -196,7 +196,21 @@ class AlertsApiIT extends IntegrationTestBase {
                           + patient
                           + "&status=OPEN&status=ACKNOWLEDGED")
                       .body());
-          return top.path("totalElements").asLong() == 1L
+          JsonNode typed =
+              json.readTree(
+                  get("/api/v1/alerts?q=septic&patientId="
+                          + patient
+                          + "&type=THRESHOLD&severity=MEDIUM")
+                      .body());
+          JsonNode noMatch =
+              json.readTree(
+                  get("/api/v1/alerts?q=septic&patientId="
+                          + patient
+                          + "&type=NEWS2&severity=MEDIUM")
+                      .body());
+          return typed.path("totalElements").asLong() == 1L
+              && noMatch.path("totalElements").asLong() == 0L
+              && top.path("totalElements").asLong() == 1L
               && top.path("items").get(0).path("alertId").asString().equals(parent.toString())
               && kids.path("totalElements").asLong() == 1L
               && kids.path("items").get(0).path("alertId").asString().equals(child.toString())

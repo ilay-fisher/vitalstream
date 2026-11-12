@@ -134,7 +134,7 @@ class AlertPipelineIT extends IntegrationTestBase {
           "c" + minute);
     }
 
-    UUID episode = awaitEpisode(first);
+    UUID episode = awaitSingleEpisode(patient);
     awaitOccurrences(episode, 4);
 
     assertThat(countEpisodes(patient)).isEqualTo(1L);

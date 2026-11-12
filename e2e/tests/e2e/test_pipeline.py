@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 import httpx
 import pytest
@@ -69,12 +70,33 @@ def test_04_stream_processor_raises_alert_on_alerts_detected(pipeline: Pipeline)
 def test_05_clinical_api_lists_the_alert(
     pipeline: Pipeline, alerts_for_patient: list[dict[str, object]]
 ) -> None:
+    """Clinicians see episodes: their ids differ from the detection ids on alerts.detected."""
     assert pipeline.alerts_tail is not None
-    detected_ids = {r.value["alertId"] for r in pipeline.alerts_tail.records}
-    listed_ids = {a["alertId"] for a in alerts_for_patient}
-    assert listed_ids & detected_ids, "clinical-api shows none of the alerts the processor raised"
-    assert all(a["patientId"] == PATIENT for a in alerts_for_patient)
-    log(f"clinical-api: {len(alerts_for_patient)} alerts for {PATIENT}")
+    detections = [
+        r.value for r in pipeline.alerts_tail.records if r.value.get("patientId") == PATIENT
+    ]
+    assert detections, f"no detection for {PATIENT} was seen on alerts.detected"
+    detection_ids = {d["alertId"] for d in detections}
+    detected_kinds = {(d["type"], d.get("metric")) for d in detections}
+    # episodes that earlier runs left behind (lastSeenAt before this run started) are not ours
+    ours = [
+        a
+        for a in alerts_for_patient
+        if datetime.fromisoformat(str(a["lastSeenAt"])) >= pipeline.started_at
+    ]
+
+    assert ours, "clinical-api lists none of the episodes raised during this run"
+    for alert in ours:
+        assert alert["patientId"] == PATIENT
+        assert alert["occurrences"] >= 1, alert  # type: ignore[operator]
+        assert (
+            alert["lastDetectionId"] in detection_ids
+            or (alert["type"], alert["metric"]) in detected_kinds
+        ), f"episode {alert['alertId']} matches no detection seen on alerts.detected"
+    log(
+        f"clinical-api: {len(ours)} episodes ({len(alerts_for_patient)} listed) "
+        f"for {len(detections)} detections of {PATIENT}"
+    )
 
 
 def test_06_sse_stream_delivers_the_alert(pipeline: Pipeline) -> None:

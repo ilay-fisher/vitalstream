@@ -19,6 +19,7 @@ class EpisodeResolverIT extends IntegrationTestBase {
 
   @Autowired EpisodeResolver resolver;
   @Autowired MeterRegistry meters;
+  @Autowired org.springframework.data.redis.core.StringRedisTemplate redis;
 
   private final JsonMapper json = JsonMapper.builder().build();
 
@@ -97,8 +98,14 @@ class EpisodeResolverIT extends IntegrationTestBase {
         .param("id", child)
         .update();
 
+    assertThat(rabbitMessagesFor(child, Duration.ofSeconds(3))).as("quiet while grouped").isEmpty();
+
+    resolver.resolveStale();
     resolver.resolveStale();
 
+    assertThat(rabbitMessagesFor(child, Duration.ofSeconds(8)))
+        .as("pages once when unlinked")
+        .hasSize(1);
     var childView = json.readTree(get("/api/v1/alerts/" + child).body());
     assertThat(childView.path("status").asString()).isEqualTo("OPEN");
     assertThat(childView.path("parentAlertId").isNull()).isTrue();
@@ -119,5 +126,22 @@ class EpisodeResolverIT extends IntegrationTestBase {
                 .query(Long.class)
                 .single())
         .isEqualTo(1L);
+  }
+
+  @Test
+  void anAcknowledgedChildUnlinkedByItsParentDoesNotPage() throws Exception {
+    String patient = "P-4005";
+    send(patient, "NEWS2", "HIGH", null, "2026-11-11T20:15:00Z", "news2");
+    UUID child = send(patient, "THRESHOLD", "MEDIUM", "HEART_RATE", "2026-11-11T20:15:00Z", "hr");
+    assertThat(postJson("/api/v1/alerts/" + child + "/ack", "{}").statusCode()).isEqualTo(200);
+    jdbc.sql("UPDATE clinical.alerts SET last_seen_at = now() WHERE id = :id")
+        .param("id", child)
+        .update();
+
+    resolver.resolveStale();
+
+    assertThat(rabbitMessagesFor(child, Duration.ofSeconds(5))).isEmpty();
+    assertThat(json.readTree(get("/api/v1/alerts/" + child).body()).path("parentAlertId").isNull())
+        .isTrue();
   }
 }

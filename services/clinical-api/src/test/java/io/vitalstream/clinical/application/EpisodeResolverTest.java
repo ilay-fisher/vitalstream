@@ -33,12 +33,14 @@ class EpisodeResolverTest {
   private final InMemoryAlertRepository alerts = new InMemoryAlertRepository();
   private final OutboxRepository outbox = mock(OutboxRepository.class);
   private final LiveFeedPublisher liveFeed = mock(LiveFeedPublisher.class);
+  private final SuppressionStore suppression = mock(SuppressionStore.class);
   private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
 
   private EpisodeResolver resolverAt(Instant now) {
     return new EpisodeResolver(
         alerts,
         outbox,
+        suppression,
         liveFeed,
         new DirectUnitOfWork(),
         new OutboxPayloads(JsonMapper.builder().build()),
@@ -55,7 +57,8 @@ class EpisodeResolverTest {
 
   @BeforeEach
   void quiet() {
-    org.mockito.Mockito.reset(outbox, liveFeed);
+    org.mockito.Mockito.reset(outbox, liveFeed, suppression);
+    org.mockito.Mockito.when(suppression.tryAcquire(any(), any(), any())).thenReturn(true);
   }
 
   @Test
@@ -136,7 +139,7 @@ class EpisodeResolverTest {
     assertThat(orphan.version()).isEqualTo(1);
     assertThat(outboxRows())
         .extracting(OutboxEntry::aggregateId)
-        .containsExactlyInAnyOrder(parent.id(), child.id());
+        .containsOnly(parent.id(), child.id());
     ArgumentCaptor<AlertView> views = ArgumentCaptor.forClass(AlertView.class);
     verify(liveFeed, org.mockito.Mockito.times(2)).publish(views.capture());
     assertThat(views.getAllValues())
@@ -172,5 +175,69 @@ class EpisodeResolverTest {
     doThrow(new IllegalStateException("redis down")).when(liveFeed).publish(any());
 
     assertThat(resolverAt(SEEN.plus(Duration.ofHours(1))).resolveStale()).isEqualTo(1);
+  }
+
+  private Alert[] parentWithChild(boolean acknowledged) {
+    Alert parent = Alert.open(TestAlerts.detection(AlertType.NEWS2, Severity.HIGH, null, 0));
+    Alert child = Alert.open(TestAlerts.detection(Severity.MEDIUM, 3)).withParent(parent.id());
+    if (acknowledged) {
+      child = child.acknowledge("dr", null, SEEN).withParent(parent.id());
+    }
+    alerts.seed(parent);
+    alerts.seed(child);
+    return new Alert[] {parent, child};
+  }
+
+  private static final Instant AFTER_PARENT = SEEN.plus(Duration.ofMinutes(5)).plusSeconds(1);
+
+  @Test
+  void anOpenChildUnlinkedByItsParentsResolutionPagesOnce() {
+    Alert child = parentWithChild(false)[1];
+    EpisodeResolver resolver = resolverAt(AFTER_PARENT);
+
+    resolver.resolveStale();
+    resolver.resolveStale();
+    resolver.resolveStale();
+
+    assertThat(outboxRows())
+        .filteredOn(r -> r.aggregateId().equals(child.id()))
+        .extracting(OutboxEntry::eventType)
+        .containsExactly(OutboxEventType.ALERT_INDEX, OutboxEventType.ALERT_NOTIFY);
+    verify(suppression)
+        .tryAcquire(
+            org.mockito.ArgumentMatchers.eq("alert:suppress:P-0001:THRESHOLD:HEART_RATE"),
+            org.mockito.ArgumentMatchers.eq(child.id().toString()),
+            any());
+    assertThat(
+            meters
+                .counter("vitalstream_alert_episodes", "event", "unlinked", "type", "THRESHOLD")
+                .count())
+        .isEqualTo(1.0);
+  }
+
+  @Test
+  void anAcknowledgedUnlinkedChildStaysQuiet() {
+    Alert child = parentWithChild(true)[1];
+
+    resolverAt(AFTER_PARENT).resolveStale();
+
+    assertThat(alerts.get(child.id()).parentAlertId()).isNull();
+    assertThat(outboxRows())
+        .filteredOn(r -> r.aggregateId().equals(child.id()))
+        .extracting(OutboxEntry::eventType)
+        .containsExactly(OutboxEventType.ALERT_INDEX);
+  }
+
+  @Test
+  void aSuppressedUnlinkIsIndexedButNotNotified() {
+    Alert child = parentWithChild(false)[1];
+    org.mockito.Mockito.when(suppression.tryAcquire(any(), any(), any())).thenReturn(false);
+
+    resolverAt(AFTER_PARENT).resolveStale();
+
+    assertThat(outboxRows())
+        .filteredOn(r -> r.aggregateId().equals(child.id()))
+        .extracting(OutboxEntry::eventType)
+        .containsExactly(OutboxEventType.ALERT_INDEX);
   }
 }

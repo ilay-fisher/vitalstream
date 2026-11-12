@@ -1,7 +1,12 @@
 package io.vitalstream.clinical.application;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import io.vitalstream.clinical.domain.Alert;
+import io.vitalstream.clinical.domain.AlertType;
+import io.vitalstream.clinical.domain.DeliveryPlanner;
+import io.vitalstream.clinical.domain.EpisodeChange;
 import io.vitalstream.clinical.domain.OutboxEventType;
+import io.vitalstream.clinical.domain.SuppressionPolicy;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -30,6 +35,7 @@ public class EpisodeResolver {
   private static final Logger log = LoggerFactory.getLogger(EpisodeResolver.class);
 
   private final AlertRepository alerts;
+  private final SuppressionStore suppression;
   private final UnitOfWork unitOfWork;
   private final EpisodeEffects effects;
   private final Clock clock;
@@ -39,6 +45,7 @@ public class EpisodeResolver {
   public EpisodeResolver(
       AlertRepository alerts,
       OutboxRepository outbox,
+      SuppressionStore suppression,
       LiveFeedPublisher liveFeed,
       UnitOfWork unitOfWork,
       OutboxPayloads payloads,
@@ -46,6 +53,7 @@ public class EpisodeResolver {
       MeterRegistry meters,
       @Value("${vitalstream.episodes.resolve-after:PT5M}") Duration resolveAfter) {
     this.alerts = alerts;
+    this.suppression = suppression;
     this.unitOfWork = unitOfWork;
     this.effects = new EpisodeEffects(outbox, liveFeed, payloads, clock);
     this.clock = clock;
@@ -71,19 +79,25 @@ public class EpisodeResolver {
           .increment();
       log.atInfo().addKeyValue("alertId", episode.id()).log("Episode {} resolved", episode.id());
     }
+    for (AlertType type : resolution.unlinked()) {
+      meters
+          .counter("vitalstream_alert_episodes", "event", "unlinked", "type", type.name())
+          .increment();
+    }
     return resolution.resolved().size();
   }
 
   private Resolution resolve(Instant now, String correlationId) {
     List<ResolvedEpisode> resolved = alerts.resolveStale(now.minus(resolveAfter), now);
     if (resolved.isEmpty()) {
-      return new Resolution(List.of(), List.of());
+      return new Resolution(List.of(), List.of(), List.of());
     }
     Set<UUID> resolvedIds = new LinkedHashSet<>();
     resolved.forEach(r -> resolvedIds.add(r.id()));
 
+    List<UUID> unlinked = alerts.unlinkChildren(resolvedIds);
     Set<UUID> changed = new LinkedHashSet<>(resolvedIds);
-    changed.addAll(alerts.unlinkChildren(resolvedIds));
+    changed.addAll(unlinked);
     for (ResolvedEpisode episode : resolved) {
       UUID parent = episode.parentAlertId();
       if (parent != null && !resolvedIds.contains(parent)) {
@@ -93,13 +107,31 @@ public class EpisodeResolver {
     }
 
     List<AlertView> views = new ArrayList<>();
+    List<AlertType> unlinkedTypes = new ArrayList<>();
     for (UUID id : changed) {
-      AlertView view = AlertView.from(alerts.findById(id).orElseThrow());
-      effects.enqueue(OutboxEventType.ALERT_INDEX, view, correlationId);
+      Alert stored = alerts.findById(id).orElseThrow();
+      AlertView view = AlertView.from(stored);
+      boolean wasUnlinked = unlinked.contains(id);
+      EpisodeChange change = wasUnlinked ? EpisodeChange.UNLINKED : EpisodeChange.UPDATED;
+      boolean suppressed =
+          DeliveryPlanner.notifies(stored, change) && !claimNotificationWindow(stored);
+      for (OutboxEventType type : DeliveryPlanner.plan(stored, change, suppressed)) {
+        effects.enqueue(type, view, correlationId);
+      }
+      if (wasUnlinked) {
+        unlinkedTypes.add(stored.type());
+      }
       views.add(view);
     }
-    return new Resolution(resolved, views);
+    return new Resolution(resolved, views, unlinkedTypes);
   }
 
-  private record Resolution(List<ResolvedEpisode> resolved, List<AlertView> views) {}
+  /** Claims the shared suppression window, owned by the episode so it pages at most once. */
+  private boolean claimNotificationWindow(Alert episode) {
+    return suppression.tryAcquire(
+        SuppressionPolicy.keyFor(episode), episode.id().toString(), SuppressionPolicy.WINDOW);
+  }
+
+  private record Resolution(
+      List<ResolvedEpisode> resolved, List<AlertView> views, List<AlertType> unlinked) {}
 }

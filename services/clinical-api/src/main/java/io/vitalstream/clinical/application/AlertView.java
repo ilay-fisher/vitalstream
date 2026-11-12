@@ -13,7 +13,8 @@ import java.util.UUID;
  * Read model of an alert <em>episode</em> (CONTRACTS sections 3.4 and 4): the latest detection's
  * fields plus lifecycle state. The same shape is returned by REST, pushed over SSE and Redis
  * pub/sub, queued to SQS and indexed in Elasticsearch, so every consumer sees one representation.
- * The episode fields are additive, old clients keep working.
+ * The episode fields are additive, old clients keep working. Counts are boxed so that messages from
+ * a replica or an index document that predates episodes still parse during a rolling upgrade.
  */
 @JsonInclude(JsonInclude.Include.ALWAYS)
 public record AlertView(
@@ -38,12 +39,13 @@ public record AlertView(
     @Schema(description = "Window start of the episode's first detection") Instant firstSeenAt,
     @Schema(description = "Window end of the latest detection; the resolver watches this")
         Instant lastSeenAt,
-    @Schema(description = "Number of detection windows folded into the episode") int occurrences,
+    @Schema(description = "Number of detection windows folded into the episode")
+        Integer occurrences,
     @Schema(description = "Set when the episode auto-resolved after the silence period, else null")
         Instant resolvedAt,
     @Schema(description = "NEWS2 episode this one is grouped under, null for top-level episodes")
         UUID parentAlertId,
-    @Schema(description = "Number of non-resolved child episodes") int childCount,
+    @Schema(description = "Number of non-resolved child episodes") Integer childCount,
     @Schema(description = "Id of the latest absorbed stream-processor detection")
         UUID lastDetectionId) {
 

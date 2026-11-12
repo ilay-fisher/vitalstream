@@ -180,6 +180,17 @@ abstract class IntegrationTestBase {
         .single();
   }
 
+  /**
+   * Waits until the patient has exactly one episode (later detections may already have updated it).
+   */
+  protected UUID awaitSingleEpisode(String patientId) {
+    await().atMost(Duration.ofSeconds(30)).until(() -> countEpisodes(patientId) == 1L);
+    return jdbc.sql("SELECT id FROM clinical.alerts WHERE patient_id = :p")
+        .param("p", patientId)
+        .query(UUID.class)
+        .single();
+  }
+
   protected void awaitOccurrences(UUID episodeId, int occurrences) {
     await()
         .atMost(Duration.ofSeconds(30))

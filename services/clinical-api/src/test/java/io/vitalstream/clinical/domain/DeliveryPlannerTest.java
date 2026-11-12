@@ -76,4 +76,15 @@ class DeliveryPlannerTest {
   void routingKeyIsLowercaseSeverityUnderAlertPrefix(Severity severity) {
     assertThat(severity.routingKey()).isEqualTo("alert." + severity.name().toLowerCase());
   }
+
+  @Test
+  void unlinkedOpenEpisodePagesButAnAcknowledgedOneDoesNot() {
+    Alert open = TestAlerts.alert(Severity.HIGH);
+    Alert acked = open.acknowledge("dr", null, TestAlerts.T0);
+
+    assertThat(DeliveryPlanner.notifies(open, EpisodeChange.UNLINKED)).isTrue();
+    assertThat(DeliveryPlanner.notifies(acked, EpisodeChange.UNLINKED)).isFalse();
+    assertThat(DeliveryPlanner.plan(open, EpisodeChange.UNLINKED, false))
+        .containsExactly(OutboxEventType.ALERT_INDEX, OutboxEventType.ALERT_NOTIFY);
+  }
 }

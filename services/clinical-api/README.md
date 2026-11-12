@@ -1,12 +1,13 @@
 # clinical-api
 
-Spring Boot 4 (Java 21) service on port **8082**. It consumes `alerts.detected`, stores alerts in
-Postgres, fans them out reliably (RabbitMQ, SQS, Elasticsearch, live SSE feed) and serves the
-clinical read APIs (patients, vitals history, alerts, acknowledgement).
+Spring Boot 4 (Java 21) service on port **8082**. It consumes `alerts.detected`, folds the
+per-window detections into **alert episodes** (one row per ongoing condition, see
+[Alert episodes](#alert-episodes)), fans changes out reliably (RabbitMQ, SQS, Elasticsearch, live SSE
+feed) and serves the clinical read APIs (patients, vitals history, alerts, acknowledgement).
 
 Layers: `api` (controllers, problem+json, SSE hub) -> `application` (use cases and ports) ->
-`domain` (alert lifecycle, suppression, delivery planning) <- `infrastructure` (Kafka, JDBC, Redis,
-RabbitMQ, SQS, Elasticsearch, Cassandra adapters and Spring config).
+`domain` (episode lifecycle, hierarchy, suppression, delivery planning) <- `infrastructure` (Kafka,
+JDBC, Redis, RabbitMQ, SQS, Elasticsearch, Cassandra adapters and Spring config).
 
 ## Run
 
@@ -47,6 +48,8 @@ Tests (Docker needed for integration tests, see CONTRIBUTING section 7 for the C
 | `CLINICAL_DEV_TOKENS_ENABLED` | `false` (compose fragment: `true`) | opt-in for the unauthenticated dev token endpoint; also needs `APP_ENV=dev` and no JWKS URI. Startup fails if it is `true` with `APP_ENV` other than `dev` or with `CLINICAL_JWT_JWK_SET_URI` set; when on, one WARN is logged |
 | `CLINICAL_JWT_ISSUER` | `vitalstream-dev` | required `iss` claim |
 | `LOG_PSEUDONYM_KEY` | `dev-only-pseudonym-key` | HMAC key for `patientRef` in logs (override outside local dev) |
+| `ALERT_RESOLVE_AFTER` | `PT5M` | ISO-8601 silence after which an episode auto-resolves (CONTRACTS section 3.4); Spring property `vitalstream.episodes.resolve-after` |
+| `vitalstream.episodes.resolve-interval-ms` | `30000` | how often the resolver runs on every replica (Spring property) |
 | `vitalstream.outbox.batch-size`, `vitalstream.outbox.interval-ms` | `50`, `500` | relay tuning (Spring properties) |
 | `vitalstream.kafka.retries`, `.backoff-initial`, `.backoff-multiplier` | `3`, `500ms`, `2.0` | consumer retry before DLQ |
 | `vitalstream.cors.allowed-origins` | `http://localhost:3000,http://localhost:5173` | CORS |
@@ -92,10 +95,13 @@ curl -s localhost:8082/api/v1/patients | jq                       # patients + l
 curl -s localhost:8082/api/v1/patients/P-0001 | jq
 curl -s "localhost:8082/api/v1/patients/P-0001/vitals?metric=HEART_RATE&from=2026-11-11T20:00:00Z&to=2026-11-11T21:00:00Z&resolution=minute" | jq
 curl -s "localhost:8082/api/v1/alerts?patientId=P-0001&severity=CRITICAL&status=OPEN&page=0&size=20" | jq
+curl -s "localhost:8082/api/v1/alerts?status=OPEN&status=ACKNOWLEDGED&topLevel=true" | jq   # what needs a human: one row per deterioration
+curl -s "localhost:8082/api/v1/alerts?parentAlertId=<NEWS2 episode id>" | jq             # the findings grouped under it
+curl -s "localhost:8082/api/v1/alerts?type=NEWS2&patientId=P-0001" | jq
 curl -s "localhost:8082/api/v1/alerts?q=oxygen" | jq                # full text via Elasticsearch
 curl -s localhost:8082/api/v1/alerts/<alertId> | jq
 curl -s -X POST localhost:8082/api/v1/alerts/<alertId>/ack -H 'Content-Type: application/json' \
-     -d '{"note":"at bedside"}' | jq                             # 409 if already acknowledged / concurrent change
+     -d '{"note":"at bedside"}' | jq                             # 409 if already acknowledged or resolved
 curl -N -H 'Accept: text/event-stream' localhost:8082/api/v1/alerts/stream   # live feed, event "alert"
 ```
 
@@ -125,7 +131,7 @@ is `GET /api/v1/alerts?q=...`, and acknowledgement is `POST` (CONTRACTS section 
 With `resolution=minute` the response has `"resolution":"MINUTE"` and points are
 `{"observedAt":"<window start>","metric":"HEART_RATE","min":98.0,"max":104.0,"avg":101.0,"count":12}`.
 
-`GET /api/v1/alerts?patientId=&severity=&status=&q=&page=0&size=20` (size 1..100, newest first):
+`GET /api/v1/alerts?patientId=&severity=&status=&type=&topLevel=&parentAlertId=&q=&page=0&size=20` (size 1..100, sorted by `lastSeenAt` descending; `status` is repeatable; `topLevel=true` hides episodes grouped under a NEWS2 parent, `topLevel=false` does not filter; `parentAlertId` lists one episode's children):
 
 ```json
 {"items":[<AlertView>],"page":0,"size":20,"totalElements":31,"totalPages":2}
@@ -138,13 +144,66 @@ With `resolution=minute` the response has `"resolution":"MINUTE"` and points are
  "metric":null,"value":null,"score":7.0,"message":"NEWS2 score 7 (RR 25, SpO2 91, HR 131)",
  "windowStart":"2026-11-11T20:15:00Z","windowEnd":"2026-11-11T20:16:00Z","detectedAt":"2026-11-11T20:16:02.010Z",
  "status":"ACKNOWLEDGED","acknowledgedBy":"dr.cohen","acknowledgedAt":"2026-11-11T20:20:00Z",
- "acknowledgementNote":"at bedside","version":1}
+ "acknowledgementNote":"at bedside","version":1,
+ "firstSeenAt":"2026-11-11T20:10:00Z","lastSeenAt":"2026-11-11T20:16:00Z","occurrences":6,
+ "resolvedAt":null,"parentAlertId":null,"childCount":2,
+ "lastDetectionId":"5a0f1c9e-7a0e-5b0e-8f55-0f6f0d3c1a11"}
 ```
 
-SSE events (`event: alert`, `id: <alertId>:<version>`) carry the same `AlertView` as `data`.
+`alertId` is the **episode** id; `lastDetectionId` is the stream-processor detection id (`alertId` of
+the `alerts.detected` record). `severity` is the episode's peak, `value`/`score`/`message`/`window*`
+describe the latest detection, `childCount` counts non-resolved children.
+
+SSE events (`event: alert`, `id: <alertId>:<version>`) carry the same `AlertView` as `data` on every
+episode change (open, update, escalation, ack, resolve, link/unlink); clients upsert by `alertId`.
 
 Errors (`application/problem+json`): `{"type":"about:blank","title":"Resource not found","status":404,"detail":"Alert ... not found","instance":"/api/v1/alerts/...","correlationId":"..."}`;
-404 unknown alert/patient, 400 invalid parameter or Host, 409 already acknowledged or concurrent change, 503 backing store down.
+404 unknown alert/patient, 400 invalid parameter or Host, 409 already acknowledged or resolved, 503 backing store down.
+
+## Alert episodes
+
+The stream processor emits one detection per patient, type, metric and 1-minute window. Clinicians
+see **episodes** (CONTRACTS section 3.4): one row per ongoing condition, key `(patientId, type,
+metric)`, at most one non-resolved episode per key (partial unique index
+`alerts_active_episode_uidx`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> OPEN: first detection of a key (episode id = uuid5 of its first window)
+    OPEN --> OPEN: newer window (occurrences+1) or severity raise
+    OPEN --> ACKNOWLEDGED: POST /ack (CLINICIAN)
+    ACKNOWLEDGED --> ACKNOWLEDGED: newer window (still counted)
+    ACKNOWLEDGED --> OPEN: severity raise (escalation re-opens, ack fields kept)
+    OPEN --> RESOLVED: silent for ALERT_RESOLVE_AFTER
+    ACKNOWLEDGED --> RESOLVED: silent for ALERT_RESOLVE_AFTER
+    RESOLVED --> [*]: a later detection opens a new episode
+```
+
+- **Idempotency.** A detection older than the episode's latest `windowStart` is ignored; the same
+  `windowStart` (Spark update-mode re-emit) only applies a severity raise. Replaying the first
+  detection of a resolved episode re-derives its id, hits the primary key and is ignored.
+- **Hierarchy.** NEWS2 is the parent. A THRESHOLD / TREND_ZSCORE / ML_ANOMALY episode whose severity
+  is at most the active NEWS2 episode's links to it (`parentAlertId`); one that outranks it stays
+  top-level and keeps paging. Opening or escalating a NEWS2 adopts the patient's qualifying open
+  episodes; a child that escalates past its parent is unlinked. When the parent resolves, its
+  non-resolved children are unlinked and a still-OPEN child pages once, like an open (an
+  ACKNOWLEDGED one stays quiet, metric event `unlinked`).
+- **Notifications.** RabbitMQ `alerts.notify` / SQS (CRITICAL) only when a top-level episode opens,
+  escalates or is unlinked while OPEN. Updates, children, acks and resolutions only index and push
+  live. The `alert:suppress` window still applies; the episode id owns it, so an episode's own
+  escalation is never swallowed by its opening notification.
+- **Concurrency.** Kafka keys by patient, but the intake also uses version compare-and-set and the
+  unique index: on a lost race the whole step is retried against fresh state (3 attempts, then the
+  Kafka error handler retries and dead-letters). Ack retries version clashes caused by ingest
+  updates server-side (3 attempts); 409 only for ACKNOWLEDGED or RESOLVED.
+- **Resolver.** Every replica runs `EpisodeResolver` every 30 s. It is one conditional
+  `UPDATE ... WHERE status <> 'RESOLVED' AND last_seen_at < cutoff RETURNING ...`, so replicas cannot
+  double-resolve and a repeated run is a no-op.
+- **Migration V2 (legacy rows).** Per key the newest non-resolved row stays open with
+  `occurrences` = number of rows of the key, older rows become RESOLVED (`resolved_at` = migration
+  time, acknowledgement fields kept), `first_seen_at` = `window_start`, `last_seen_at` =
+  `window_end`, `last_detection_id` = the row id; then the unique index is created. Every row is
+  queued in the outbox for re-indexing so Elasticsearch converges. Legacy rows get no parent.
 
 ## Alert flow
 
@@ -162,9 +221,9 @@ sequenceDiagram
     participant SSE as SSE clients (every replica)
     SP->>K: AlertEvent (correlationId header)
     K->>C: poll
-    C->>PG: TX: INSERT alert ON CONFLICT DO NOTHING
-    C->>R: SET alert:suppress:{patient}:{type}:{metric} NX EX 300
-    C->>PG: TX: INSERT outbox rows (index / notify / escalate)
+    C->>PG: TX: open or update the episode (version CAS, partial unique index), link / unlink NEWS2 children
+    C->>R: SET alert:suppress:{patient}:{type}:{metric} NX EX 300 (only top-level open / escalation)
+    C->>PG: TX: INSERT outbox rows (index always; notify / escalate only when paging)
     C->>K: commit offset (manual ack)
     C->>R: PUBLISH alerts.live
     R-->>SSE: every replica receives, fans out to its clients
@@ -188,11 +247,11 @@ sequenceDiagram
 - **`FOR UPDATE SKIP LOCKED`.** Every replica runs the relay. Rows locked by one replica are skipped
   by the others, so scaling out increases throughput without double delivery or lock waits. The
   claiming transaction stays open while delivering; batches are small (50) to bound lock time.
-- **Idempotent intake.** `alertId` is deterministic (UUIDv5), the insert is `ON CONFLICT DO NOTHING`
-  and a replay returns before touching suppression, outbox or live feed.
-- **Suppression.** `SET NX` with a 5 minute TTL (value = claiming alertId, so a redelivery of the
-  same alert is not mistaken for a repeat). Suppressed alerts are stored, indexed and shown live, but
-  get no RabbitMQ/SQS notification.
+- **Idempotent intake.** Detection ids and episode ids are deterministic (UUIDv5); replays and late
+  detections return before touching suppression, outbox or live feed (see Alert episodes).
+- **Suppression.** `SET NX` with a 5 minute TTL (value = claiming episode id, so a redelivery or an
+  escalation of the same episode is not mistaken for a repeat). Suppressed episodes are stored,
+  indexed and shown live, but get no RabbitMQ/SQS notification.
 - **CQRS-lite with Elasticsearch.** Postgres is the source of truth for state and structured
   queries; Elasticsearch is a read model fed through the outbox, used only when `q` is given. Searches
   can lag the database by one relay tick.
@@ -200,7 +259,8 @@ sequenceDiagram
   alert, but every client must see it. The consumer publishes to Redis `alerts.live`; every replica
   subscribes and writes to its own SSE connections. The live feed is best effort (a Redis outage does
   not fail ingestion; clients can reload from `/api/v1/alerts`).
-- **Optimistic locking on ack.** `UPDATE ... WHERE id=? AND version=?`; a lost race returns 409.
+- **Optimistic locking on ack.** `UPDATE ... WHERE id=? AND version=?`; a clash with an ingest
+  update is retried (3 attempts), the fresh state decides whether it is a 409.
 - **DLQ headers.** Records on `alerts.detected.dlq` keep the original key, value bytes and headers (`correlationId`, ...) and add `originalTopic` and `error` (`"<ExceptionSimpleName>: <message>"` of the listener failure, max 500 chars; poison records show `PoisonMessageException: ...`), plus Spring's standard `kafka_dlt-*` headers.
 - **Errors.** `DefaultErrorHandler` with exponential backoff (3 retries) then
   `DeadLetterPublishingRecoverer`; non-retryable poison records are dead-lettered immediately with
@@ -211,7 +271,9 @@ sequenceDiagram
 
 ## Metrics
 
-`alerts_consumed_total{outcome}`, `alerts_suppressed_total`, `alerts_dlq_total`, `vitalstream_alerts_raised_total{severity,type}` (alerts persisted, CONTRACTS section 7),
+`alerts_consumed_total{outcome=opened|updated|escalated|ignored}`, `alerts_suppressed_total`, `alerts_dlq_total`,
+`vitalstream_alerts_raised_total{severity,type}` (detections applied; late or replayed ones are not counted),
+`vitalstream_alert_episodes_total{event=opened|escalated|resolved|unlinked,type}` (CONTRACTS section 7; `unlinked` = a child that became top-level when its NEWS2 parent resolved),
 `outbox_lag_seconds` (age of oldest unpublished row), `notifications_sent_total{channel=rabbitmq|sqs}`,
 `cache_requests_total{cache="vitals",result=hit|miss}` plus the standard JVM/HTTP/Kafka metrics.
 

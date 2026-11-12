@@ -337,6 +337,9 @@ class AlertIngestServiceTest {
     assertThat(views).extracting(AlertView::alertId).containsExactly(child.id(), parent.id());
     assertThat(views.getLast().childCount()).isEqualTo(1);
     assertThat(views.getFirst().parentAlertId()).isEqualTo(parent.id());
+    assertThat(views.getLast().version())
+        .as("parent version bumps with its child count")
+        .isEqualTo(1);
     verify(suppression, org.mockito.Mockito.times(1)).tryAcquire(any(), any(), any());
   }
 
@@ -409,6 +412,7 @@ class AlertIngestServiceTest {
     List<AlertView> views = published();
     assertThat(views).extracting(AlertView::alertId).containsExactly(child.id(), parent.id());
     assertThat(views.getLast().childCount()).isZero();
+    assertThat(views.getLast().version()).isGreaterThan(parent.version());
   }
 
   @Test

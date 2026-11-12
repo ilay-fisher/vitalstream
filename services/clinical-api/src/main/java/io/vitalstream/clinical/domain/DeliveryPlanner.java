@@ -10,10 +10,12 @@ public final class DeliveryPlanner {
 
   /**
    * Only a top-level episode that just opened or escalated may page anyone: updates, children,
-   * acknowledgements and resolutions are shown live but stay quiet (CONTRACTS section 3.4).
+   * acknowledgements and resolutions are shown live but stay quiet (CONTRACTS section 3.4). An
+   * unlinked episode pages only while still OPEN: an acknowledged one already has an owner.
    */
   public static boolean notifies(Alert episode, EpisodeChange change) {
-    return change.mayNotify() && episode.isTopLevel();
+    boolean owned = change == EpisodeChange.UNLINKED && episode.status() != AlertStatus.OPEN;
+    return change.mayNotify() && episode.isTopLevel() && !owned;
   }
 
   /**

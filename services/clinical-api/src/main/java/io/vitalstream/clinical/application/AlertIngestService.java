@@ -199,6 +199,7 @@ public class AlertIngestService {
       case OPENED -> Outcome.OPENED;
       case UPDATED -> Outcome.UPDATED;
       case ESCALATED -> Outcome.ESCALATED;
+      case UNLINKED -> throw new IllegalStateException("a detection never unlinks an episode");
     };
   }
 
