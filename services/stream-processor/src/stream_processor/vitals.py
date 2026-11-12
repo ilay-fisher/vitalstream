@@ -63,6 +63,16 @@ SPECS: dict[Metric, MetricSpec] = {
     Metric.TEMPERATURE: MetricSpec("Cel", "8310-5", 30, 43, 36.1, 38.0, 35, 39.1),
 }
 
+# Smallest window-mean departure from the trend that matters clinically (CONTRACTS 3.3).
+MIN_TREND_DELTA: dict[Metric, float] = {
+    Metric.HEART_RATE: 10.0,
+    Metric.RESP_RATE: 4.0,
+    Metric.SPO2: 3.0,
+    Metric.SYSTOLIC_BP: 15.0,
+    Metric.DIASTOLIC_BP: 10.0,
+    Metric.TEMPERATURE: 0.5,
+}
+
 
 def is_valid_reading(metric: Metric, value: float) -> bool:
     """Return True when `value` lies inside the metric's physiological valid range.

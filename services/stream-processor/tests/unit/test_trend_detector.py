@@ -17,7 +17,9 @@ NOW = datetime(2026, 11, 11, 22, 0, 0, tzinfo=timezone.utc)
 SEEDS = range(12)
 
 
-def window_means(true_value: Callable[[int], float], sd: float, minutes: int, seed: int) -> list[float]:
+def window_means(
+    true_value: Callable[[int], float], sd: float, minutes: int, seed: int
+) -> list[float]:
     """Mean of 60 noisy 1 Hz samples per minute around `true_value(minute)`."""
     rng = random.Random(seed)
     return [
@@ -88,9 +90,9 @@ def test_step_change_is_detected_while_the_baseline_adapts() -> None:
         assert len(alerts) <= 3  # the baseline catches up, the alarm does not run forever
 
 
-def test_spo2_drop_alerts_as_falling() -> None:
+def test_spo2_fall_alerts_as_falling() -> None:
     for seed in SEEDS:
-        means = window_means(lambda m: 97.5 if m < 12 else 91.0, 0.6, 30, seed)
+        means = window_means(lambda m: 97.5 - 4.0 * min(max(0, m - 10), 6), 0.6, 30, seed)
         alerts = drive(Metric.SPO2, means)
         assert alerts, f"seed {seed}: drop not detected"
         assert alerts[0][1].message.startswith("SPO2 falling: ")

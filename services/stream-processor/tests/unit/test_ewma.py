@@ -6,7 +6,9 @@ CFG = EwmaConfig()
 MIN = 60_000  # one window in epoch milliseconds
 
 
-def _state(mean: float = 75.0, var: float = 1.0, n: int = 20, ts: int = 0, hist: str = "") -> EwmaState:
+def _state(
+    mean: float = 75.0, var: float = 1.0, n: int = 20, ts: int = 0, hist: str = ""
+) -> EwmaState:
     return EwmaState(mean=mean, var=var, n=n, last_ts=ts, hist=hist)
 
 
