@@ -99,6 +99,7 @@ async def test_correlation_id_is_forwarded_to_clinical_api(
         headers={"X-Correlation-Id": "corr-fwd-9"},
     )
     assert route.calls.last.request.headers["X-Correlation-Id"] == "corr-fwd-9"
+    assert route.calls.last.request.headers["Authorization"] == "Bearer test-service-token"
 
 
 async def test_session_memory_carries_patient_between_turns(

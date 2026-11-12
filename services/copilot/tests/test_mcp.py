@@ -93,10 +93,10 @@ async def test_search_guidelines_tool_returns_citable_passages(stack: dict[str, 
 async def test_vitals_and_alert_tools_use_clinical_api(
     stack: dict[str, Any], clinical_mock: respx.MockRouter
 ) -> None:
-    clinical_mock.get(f"{CLINICAL}/api/v1/patients/P-0001/vitals").mock(
+    vitals_route = clinical_mock.get(f"{CLINICAL}/api/v1/patients/P-0001/vitals").mock(
         return_value=httpx.Response(200, json=DETERIORATING)
     )
-    clinical_mock.get(f"{CLINICAL}/api/v1/alerts").mock(
+    alerts_route = clinical_mock.get(f"{CLINICAL}/api/v1/alerts").mock(
         return_value=httpx.Response(200, json={"content": [ALERT_HIGH]})
     )
     async with mcp_session(stack) as session:
@@ -108,6 +108,8 @@ async def test_vitals_and_alert_tools_use_clinical_api(
         )
     assert vitals["latest"]["HEART_RATE"]["value"] == 131.0
     assert alerts["count"] == 1
+    for route in (vitals_route, alerts_route):
+        assert route.calls.last.request.headers["Authorization"] == "Bearer test-service-token"
 
 
 async def test_tool_errors_surface_as_mcp_errors(stack: dict[str, Any]) -> None:

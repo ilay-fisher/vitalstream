@@ -8,6 +8,7 @@ import respx
 
 from copilot.agent.graph import CopilotAgent
 from copilot.clinical import ClinicalApiClient
+from copilot.clinical_auth import StaticTokenProvider
 from copilot.llm.fake import FakeLLM
 from copilot.rag.embedder import HashEmbedder
 from copilot.rag.ingest import IngestService
@@ -17,6 +18,7 @@ from tests.fakes import InMemoryKeywordIndex, InMemoryStore
 
 CORPUS = Path(__file__).resolve().parents[1] / "corpus"
 CLINICAL = "http://clinical.test"
+SERVICE_TOKEN = "test-service-token"
 
 DETERIORATING = [
     {"metric": "HEART_RATE", "value": 131.0, "unit": "/min", "observedAt": "2026-11-11T20:15:30Z"},
@@ -70,7 +72,7 @@ async def stack() -> AsyncIterator[dict[str, object]]:
     ingest = IngestService(embedder, store, keyword)
     await ingest.ingest_corpus_if_empty(CORPUS)
     retriever = Retriever(embedder, store, keyword)
-    clinical = ClinicalApiClient(CLINICAL, timeout=2.0)
+    clinical = ClinicalApiClient(CLINICAL, StaticTokenProvider(SERVICE_TOKEN), timeout=2.0)
     tools = CopilotTools(clinical, retriever)
     yield {
         "embedder": embedder,
