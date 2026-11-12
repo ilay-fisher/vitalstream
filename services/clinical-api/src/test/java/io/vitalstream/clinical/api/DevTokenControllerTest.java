@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import io.vitalstream.clinical.application.TokenIssuer;
 import io.vitalstream.clinical.infrastructure.config.ClinicalProperties;
 import io.vitalstream.clinical.infrastructure.security.SecurityConfig;
 import io.vitalstream.clinical.infrastructure.security.TestTokens;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.ApplicationContext;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
@@ -128,12 +130,27 @@ class DevTokenControllerTest {
   class OutsideDev {
 
     @Autowired MockMvc mvc;
+    @Autowired ApplicationContext context;
+
+    @Test
+    void theEndpointAndTheHmacIssuerAreNotRegisteredAtAll() {
+      assertThat(context.getBeanNamesForType(DevTokenController.class)).isEmpty();
+      assertThat(context.getBeanNamesForType(TokenIssuer.class)).isEmpty();
+    }
 
     @Test
     void isNotFoundInProd() throws Exception {
       mvc.perform(post("/api/v1/dev/token").contentType(MediaType.APPLICATION_JSON).content(BODY))
           .andExpect(status().isNotFound())
           .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+    }
+
+    @Test
+    void aMalformedBodyIsAlsoNotFound() throws Exception {
+      for (String bad : new String[] {"{not json", "", "[1,2"}) {
+        mvc.perform(post("/api/v1/dev/token").contentType(MediaType.APPLICATION_JSON).content(bad))
+            .andExpect(status().isNotFound());
+      }
     }
   }
 
@@ -150,11 +167,21 @@ class DevTokenControllerTest {
   class InJwksMode {
 
     @Autowired MockMvc mvc;
+    @Autowired ApplicationContext context;
 
     @Test
     void isNotFoundEvenInDev() throws Exception {
       mvc.perform(post("/api/v1/dev/token").contentType(MediaType.APPLICATION_JSON).content(BODY))
           .andExpect(status().isNotFound());
+      mvc.perform(
+              post("/api/v1/dev/token").contentType(MediaType.APPLICATION_JSON).content("{bad"))
+          .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void noDevBeansAreRegistered() {
+      assertThat(context.getBeanNamesForType(DevTokenController.class)).isEmpty();
+      assertThat(context.getBeanNamesForType(TokenIssuer.class)).isEmpty();
     }
 
     @Test
