@@ -81,6 +81,8 @@ class EpisodeResolverIT extends IntegrationTestBase {
                 .single())
         .isEqualTo("RESOLVED");
 
+    // a real gap before the next episode outlasts the suppression window; the test clock cannot
+    redis.delete("alert:suppress:P-4002:THRESHOLD:SPO2");
     UUID fresh =
         send("P-4002", "THRESHOLD", "HIGH", "SPO2", "2026-11-11T21:15:00Z", "desaturation again");
 
