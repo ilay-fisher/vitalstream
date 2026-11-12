@@ -44,9 +44,7 @@ def test_token_has_the_claims_the_resource_server_requires() -> None:
     assert claims["roles"] == ["SERVICE"]
     assert claims["iat"] == NOW
     assert claims["exp"] - NOW == 30 * 24 * 3600
-    expected = hmac.new(
-        SECRET.encode(), f"{header}.{payload}".encode(), hashlib.sha256
-    ).digest()
+    expected = hmac.new(SECRET.encode(), f"{header}.{payload}".encode(), hashlib.sha256).digest()
     assert b64d(signature) == expected
 
 
