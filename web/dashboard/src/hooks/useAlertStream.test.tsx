@@ -6,7 +6,7 @@ import { mockState } from '../mocks/handlers';
 import { server } from '../test/server';
 import { useAlertStream } from './useAlertStream';
 
-const api = createApi();
+const api = createApi({ getToken: () => 'tok-stream' });
 
 describe('useAlertStream', () => {
   it('connects, receives alert events and notifies the caller', async () => {
@@ -56,6 +56,42 @@ describe('useAlertStream', () => {
     );
     const { result, unmount } = renderHook(() => useAlertStream(api));
     await waitFor(() => expect(result.current.connection).toBe('reconnecting'));
+    unmount();
+  });
+});
+
+describe('useAlertStream authorization', () => {
+  it('sends the bearer header (no EventSource, no token in the URL)', async () => {
+    const seen: Array<{ url: string; authorization: string | null }> = [];
+    server.use(
+      http.get('*/clinical-api/api/v1/alerts/stream', ({ request }) => {
+        seen.push({ url: request.url, authorization: request.headers.get('authorization') });
+        return new HttpResponse(new ReadableStream({ start() {} }), {
+          headers: { 'Content-Type': 'text/event-stream' },
+        });
+      }),
+    );
+    const { unmount } = renderHook(() => useAlertStream(api));
+    await waitFor(() => expect(seen).toHaveLength(1));
+    expect(seen[0].authorization).toBe('Bearer tok-stream');
+    expect(seen[0].url).not.toContain('tok-stream');
+    unmount();
+  });
+
+  it('goes back to sign-in on a 401 and stops reconnecting', async () => {
+    let calls = 0;
+    server.use(
+      http.get('*/clinical-api/api/v1/alerts/stream', () => {
+        calls += 1;
+        return new HttpResponse(null, { status: 401 });
+      }),
+    );
+    const onUnauthorized = vi.fn();
+    const expiring = createApi({ getToken: () => 't', onUnauthorized });
+    const { unmount } = renderHook(() => useAlertStream(expiring));
+    await waitFor(() => expect(onUnauthorized).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    expect(calls).toBe(1);
     unmount();
   });
 });

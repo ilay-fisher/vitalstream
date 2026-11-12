@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from '../test/server';
 import { ApiError, createApi, newCorrelationId, normalizePoint } from './api';
@@ -164,5 +164,92 @@ describe('helpers', () => {
   });
   it('newCorrelationId is unique', () => {
     expect(newCorrelationId()).not.toBe(newCorrelationId());
+  });
+});
+
+describe('authorization', () => {
+  it('sends the bearer token on every clinical-api call', async () => {
+    const seen: Array<string | null> = [];
+    server.use(
+      http.get('*/clinical-api/api/v1/patients', ({ request }) => {
+        seen.push(request.headers.get('authorization'));
+        return HttpResponse.json([]);
+      }),
+      http.get('*/clinical-api/api/v1/alerts/:id', ({ request }) => {
+        seen.push(request.headers.get('authorization'));
+        return HttpResponse.json({ alertId: 'a' });
+      }),
+    );
+    const authed = createApi({ getToken: () => 'tok-123' });
+
+    await authed.listPatients();
+    await authed.getAlert('a');
+
+    expect(seen).toEqual(['Bearer tok-123', 'Bearer tok-123']);
+  });
+
+  it('never puts the token in a URL', async () => {
+    const urls: string[] = [];
+    server.use(
+      http.get('*/clinical-api/api/v1/alerts', ({ request }) => {
+        urls.push(request.url);
+        return HttpResponse.json({ items: [] });
+      }),
+    );
+    const authed = createApi({ getToken: () => 'tok-secret' });
+
+    await authed.listAlerts({ q: 'x' });
+
+    expect(urls[0]).not.toContain('tok-secret');
+    expect(authed.alertStreamUrl).not.toContain('tok');
+  });
+
+  it('omits the header when signed out', async () => {
+    let header: string | null = 'unset';
+    server.use(
+      http.get('*/clinical-api/api/v1/patients', ({ request }) => {
+        header = request.headers.get('authorization');
+        return HttpResponse.json([]);
+      }),
+    );
+
+    await createApi({ getToken: () => null }).listPatients();
+
+    expect(header).toBeNull();
+  });
+
+  it('calls onUnauthorized on a 401 and still raises the error', async () => {
+    server.use(
+      http.get('*/clinical-api/api/v1/patients', () =>
+        HttpResponse.json({ title: 'Unauthorized', status: 401 }, { status: 401 }),
+      ),
+    );
+    const onUnauthorized = vi.fn();
+
+    await expect(createApi({ onUnauthorized }).listPatients()).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not sign out on a 403', async () => {
+    server.use(
+      http.post('*/clinical-api/api/v1/alerts/:id/ack', () =>
+        HttpResponse.json({ title: 'Forbidden', status: 403 }, { status: 403 }),
+      ),
+    );
+    const onUnauthorized = vi.fn();
+
+    const error = await createApi({ onUnauthorized })
+      .ackAlert('a', { note: 'x' })
+      .catch((e: unknown) => e);
+
+    expect(error).toMatchObject({ status: 403, isForbidden: true });
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it('exposes the auth headers for the SSE stream', () => {
+    expect(createApi({ getToken: () => 't' }).authHeaders()).toEqual({ Authorization: 'Bearer t' });
+    expect(createApi({ getToken: () => null }).authHeaders()).toEqual({});
   });
 });

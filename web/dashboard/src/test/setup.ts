@@ -1,7 +1,9 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
-import { afterAll, afterEach, beforeAll } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach } from 'vitest';
+import { authStore } from '../lib/auth';
 import { resetMockState } from '../mocks/handlers';
+import { signInAs } from './auth';
 import { server } from './server';
 
 /**
@@ -47,8 +49,11 @@ beforeAll(() => {
   // Must wrap the fetch that MSW patched in listen(), which is the one that rejects jsdom signals.
   globalThis.fetch = installFetch(globalThis.fetch.bind(globalThis));
 });
+// Every test starts signed in as Nurse Levi; tests of the sign-in flow sign out first.
+beforeEach(() => signInAs('nurse.levi'));
 afterEach(() => {
   cleanup();
+  authStore.signOut();
   server.resetHandlers();
   resetMockState();
 });
