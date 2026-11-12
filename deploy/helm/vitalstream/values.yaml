@@ -53,7 +53,7 @@ secrets:
   #                POSTGRES_PASSWORD RABBITMQ_PASSWORD CLINICAL_API_TOKEN.
   # CLINICAL_JWT_SECRET is required unless auth.jwt.jwkSetUri is set (JWKS mode needs no HMAC key).
   # Optional key: ANTHROPIC_API_KEY.
-  # CLINICAL_API_TOKEN: a JWT (role SERVICE, aud clinical-api) the copilot sends to clinical-api.
+  # CLINICAL_API_TOKEN: a JWT (role SERVICE, aud clinical-api) the copilot's /mcp tools send to clinical-api (chat uses the user's own token).
   existingSecret: ""
   # Render the Secret from `secrets.values` (pass them with --set, never commit them).
   # Ignored when existingSecret is set. Intended for CI and demos; prefer External Secrets in prod.
