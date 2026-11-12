@@ -325,7 +325,7 @@ services:
       n8n: {condition: service_healthy}
     healthcheck:
       <<: *hc
-      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/proxy-healthz | grep -q ok"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5678/proxy-healthz | grep -q ok"]
       start_period: 5s
     networks: [vitalstream]
 

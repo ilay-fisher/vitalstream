@@ -30,7 +30,13 @@ infra-down: ## Stop infrastructure (volumes kept)
 	$(COMPOSE_BASE) --profile tools down --remove-orphans
 
 up: ## Start infrastructure plus every discovered component
-	$(COMPOSE) $(PROFILE_FLAGS) up -d --build --wait --wait-timeout 600
+	$(COMPOSE) $(PROFILE_FLAGS) up -d --build
+	@# Same approach as infra-up: --wait would count the exiting one-shot init containers as failures.
+	$(COMPOSE) $(PROFILE_FLAGS) up -d --wait --wait-timeout 600 $$($(COMPOSE) $(PROFILE_FLAGS) config --services | grep -v '^init-')
+	@for c in $$($(COMPOSE) $(PROFILE_FLAGS) config --services | grep '^init-'); do \
+		rc=$$(docker wait $$($(COMPOSE) $(PROFILE_FLAGS) ps -aq $$c)); \
+		[ "$$rc" = "0" ] && echo "$$c: done" || { echo "$$c failed (exit $$rc)"; $(COMPOSE) $(PROFILE_FLAGS) logs $$c; exit 1; }; \
+	done
 
 down: ## Stop everything (volumes kept)
 	$(COMPOSE) --profile tools down --remove-orphans
