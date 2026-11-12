@@ -2,11 +2,13 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 import { createApi } from '../lib/api';
+import { issueMockToken } from '../mocks/auth';
 import { mockState } from '../mocks/handlers';
 import { server } from '../test/server';
 import { useAlertStream } from './useAlertStream';
 
-const api = createApi({ getToken: () => 'tok-stream' });
+const TOKEN = issueMockToken({ sub: 'nurse.levi', roles: ['CLINICIAN'] });
+const api = createApi({ getToken: () => TOKEN });
 
 describe('useAlertStream', () => {
   it('connects, receives alert events and notifies the caller', async () => {
@@ -73,8 +75,8 @@ describe('useAlertStream authorization', () => {
     );
     const { unmount } = renderHook(() => useAlertStream(api));
     await waitFor(() => expect(seen).toHaveLength(1));
-    expect(seen[0].authorization).toBe('Bearer tok-stream');
-    expect(seen[0].url).not.toContain('tok-stream');
+    expect(seen[0].authorization).toBe(`Bearer ${TOKEN}`);
+    expect(seen[0].url).not.toContain(TOKEN);
     unmount();
   });
 

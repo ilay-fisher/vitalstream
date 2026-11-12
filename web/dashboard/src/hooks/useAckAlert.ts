@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import { ApiError, type Api } from '../lib/api';
+import { useAuth } from './useAuth';
 import type { AlertView } from '../lib/types';
 
 export interface AckFailure {
@@ -12,13 +13,16 @@ export interface AckFailure {
  * Acknowledge with optimistic UI. `apply` receives the alert to show: first the optimistic
  * ACKNOWLEDGED copy, then the server's answer. On failure the original is restored; on 409
  * (someone changed the alert first) the current server state is fetched and shown instead.
+ * The acknowledging user is the signed-in one: the server derives it from the token.
  */
 export function useAckAlert(api: Api, apply: (alert: AlertView) => void) {
   const [pending, setPending] = useState<string | null>(null);
   const [failure, setFailure] = useState<AckFailure | null>(null);
+  const { session } = useAuth();
+  const by = session?.name ?? 'you';
 
   const ack = useCallback(
-    async (alert: AlertView, by: string, note: string) => {
+    async (alert: AlertView, note: string) => {
       setFailure(null);
       setPending(alert.alertId);
       apply({
@@ -28,7 +32,7 @@ export function useAckAlert(api: Api, apply: (alert: AlertView) => void) {
         acknowledgedAt: new Date().toISOString(),
       });
       try {
-        const saved = await api.ackAlert(alert.alertId, { by, note: note || undefined });
+        const saved = await api.ackAlert(alert.alertId, { note: note || undefined });
         apply(saved);
       } catch (error) {
         if (error instanceof ApiError && error.isConflict) {
@@ -54,7 +58,7 @@ export function useAckAlert(api: Api, apply: (alert: AlertView) => void) {
         setPending(null);
       }
     },
-    [api, apply],
+    [api, apply, by],
   );
 
   return { ack, pending, failure, clearFailure: () => setFailure(null) };

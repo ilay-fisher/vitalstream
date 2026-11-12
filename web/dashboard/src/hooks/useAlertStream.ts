@@ -1,14 +1,15 @@
 import { useEffect, useReducer, useRef } from 'react';
 import { newCorrelationId, normalizeAlert, type Api } from '../lib/api';
 import { initialLiveAlerts, liveAlertsReducer } from '../lib/alertsReducer';
-import { streamSse } from '../lib/sse';
+import { SseHttpError, streamSse } from '../lib/sse';
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
 
 /**
  * Subscribes to `/api/v1/alerts/stream` (SSE event `alert`) and keeps reconnecting with capped
- * backoff. Uses fetch rather than EventSource so the request carries X-Correlation-Id.
+ * backoff. Uses fetch rather than EventSource so the request carries the bearer token (never in
+ * the URL) and X-Correlation-Id. A 401 ends the session instead of retrying.
  * `onAlert` is called for every received alert (after the state update is queued).
  */
 export function useAlertStream(api: Api, onAlert?: () => void) {
@@ -30,7 +31,7 @@ export function useAlertStream(api: Api, onAlert?: () => void) {
           await streamSse(
             {
               url: api.alertStreamUrl,
-              headers: { 'X-Correlation-Id': newCorrelationId() },
+              headers: { ...api.authHeaders(), 'X-Correlation-Id': newCorrelationId() },
               signal: controller.signal,
               onOpen: () => {
                 attempt = 0;
@@ -49,8 +50,12 @@ export function useAlertStream(api: Api, onAlert?: () => void) {
               }
             },
           );
-        } catch {
+        } catch (error) {
           if (controller.signal.aborted) return;
+          if (error instanceof SseHttpError && error.status === 401) {
+            api.handleUnauthorized();
+            return;
+          }
         }
         if (controller.signal.aborted) return;
         attempt += 1;

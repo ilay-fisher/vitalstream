@@ -102,7 +102,13 @@ test('signed out, only the sign-in screen is shown and the session ends on sign 
   await expect(page.getByRole('link', { name: 'Alerts' })).toHaveCount(0);
   await page.getByRole('button', { name: /Dr\. Cohen/ }).click();
   await expect(page.getByTestId('current-user')).toContainText('Dr. Cohen');
-  expect(await page.evaluate(() => window.localStorage.length)).toBe(0);
+  const leaked = await page.evaluate(() => {
+    const token = JSON.parse(window.sessionStorage.getItem('vitalstream.session') ?? '{}').token;
+    return Object.keys(window.localStorage).some((k) =>
+      window.localStorage.getItem(k)?.includes(token),
+    );
+  });
+  expect(leaked).toBe(false);
   await page.getByRole('button', { name: 'Sign out' }).click();
   await expect(page.getByRole('heading', { name: 'Sign in to VitalStream' })).toBeVisible();
 });

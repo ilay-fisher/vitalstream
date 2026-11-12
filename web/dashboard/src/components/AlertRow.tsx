@@ -1,29 +1,24 @@
-import { useState, type FormEvent } from 'react';
+import { useId, useState, type FormEvent } from 'react';
+import { useAuth } from '../hooks/useAuth';
 import { relativeTime, TYPE_LABEL } from '../lib/format';
 import type { AlertView } from '../lib/types';
 import type { AckFailure } from '../hooks/useAckAlert';
 import { SeverityBadge } from './badges';
 
-const CLINICIAN_KEY = 'vitalstream.clinician';
-
-function storedClinician(): string {
-  try {
-    return localStorage.getItem(CLINICIAN_KEY) ?? '';
-  } catch {
-    return '';
-  }
-}
-
 interface Props {
   alert: AlertView;
   pending: boolean;
   failure: AckFailure | null;
-  onAck: (alert: AlertView, by: string, note: string) => void;
+  onAck: (alert: AlertView, note: string) => void;
   showPatient?: boolean;
   fresh?: boolean;
 }
 
-/** One alert with an inline acknowledge form (asks who acknowledges and an optional note). */
+/**
+ * One alert with an inline acknowledge form. The acknowledging user is the signed-in one (the
+ * server takes it from the token), so the form only asks for an optional note. Viewers get a
+ * disabled button that says why.
+ */
 export function AlertRow({
   alert,
   pending,
@@ -33,18 +28,13 @@ export function AlertRow({
   fresh = false,
 }: Props) {
   const [editing, setEditing] = useState(false);
-  const [by, setBy] = useState(storedClinician);
   const [note, setNote] = useState('');
+  const { session, canAcknowledge } = useAuth();
+  const hintId = useId();
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (!by.trim()) return;
-    try {
-      localStorage.setItem(CLINICIAN_KEY, by.trim());
-    } catch {
-      /* ignore */
-    }
-    onAck(alert, by.trim(), note.trim());
+    onAck(alert, note.trim());
     setEditing(false);
     setNote('');
   };
@@ -85,13 +75,10 @@ export function AlertRow({
               className="ack-form"
               aria-label={`Acknowledge alert ${alert.alertId}`}
             >
-              <label>
-                Acknowledged by
-                <input value={by} onChange={(e) => setBy(e.target.value)} required autoFocus />
-              </label>
+              <p className="acting-as">Acknowledging as {session?.name}</p>
               <label>
                 Note (optional)
-                <input value={note} onChange={(e) => setNote(e.target.value)} />
+                <input value={note} onChange={(e) => setNote(e.target.value)} autoFocus />
               </label>
               <div className="row">
                 <button type="submit" className="primary">
@@ -103,9 +90,20 @@ export function AlertRow({
               </div>
             </form>
           ) : (
-            <button onClick={() => setEditing(true)} disabled={pending}>
-              Acknowledge
-            </button>
+            <>
+              <button
+                onClick={() => setEditing(true)}
+                disabled={pending || !canAcknowledge}
+                aria-describedby={canAcknowledge ? undefined : hintId}
+              >
+                Acknowledge
+              </button>
+              {!canAcknowledge && (
+                <span id={hintId} className="hint muted">
+                  Viewers cannot acknowledge alerts
+                </span>
+              )}
+            </>
           )
         ) : (
           <span className="status" data-status={alert.status}>

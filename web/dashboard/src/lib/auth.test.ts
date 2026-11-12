@@ -150,7 +150,13 @@ describe('session lifetime', () => {
 
   it('expire() signs out with a notice, signOut() without one', () => {
     const store = newStore();
-    store.adopt({ token: 't', sub: 'a', name: 'A', roles: ['VIEWER'], expiresAt: Date.now() + HOUR });
+    store.adopt({
+      token: 't',
+      sub: 'a',
+      name: 'A',
+      roles: ['VIEWER'],
+      expiresAt: Date.now() + HOUR,
+    });
 
     store.expire();
     expect(store.getSnapshot()).toEqual({
@@ -159,7 +165,13 @@ describe('session lifetime', () => {
     });
     expect(window.sessionStorage.getItem(SESSION_KEY)).toBeNull();
 
-    store.adopt({ token: 't', sub: 'a', name: 'A', roles: ['VIEWER'], expiresAt: Date.now() + HOUR });
+    store.adopt({
+      token: 't',
+      sub: 'a',
+      name: 'A',
+      roles: ['VIEWER'],
+      expiresAt: Date.now() + HOUR,
+    });
     store.signOut();
     expect(store.getSnapshot()).toEqual({ session: null, notice: null });
   });

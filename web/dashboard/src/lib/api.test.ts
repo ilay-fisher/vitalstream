@@ -123,8 +123,8 @@ describe('createApi', () => {
         });
       }),
     );
-    const alert = await api.ackAlert('a1', { by: 'dr.cohen', note: 'seen' });
-    expect(body).toEqual({ by: 'dr.cohen', note: 'seen' });
+    const alert = await api.ackAlert('a1', { note: 'seen' });
+    expect(body).toEqual({ note: 'seen' });
     expect(alert).toMatchObject({ status: 'ACKNOWLEDGED', version: 3 });
   });
 
@@ -134,7 +134,7 @@ describe('createApi', () => {
         HttpResponse.json({ title: 'Conflict', detail: 'already acknowledged' }, { status: 409 }),
       ),
     );
-    const error = await api.ackAlert('a1', { by: 'x' }).catch((e: unknown) => e);
+    const error = await api.ackAlert('a1', { note: 'x' }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ApiError);
     expect(error).toMatchObject({ status: 409, isConflict: true, message: 'already acknowledged' });
   });
