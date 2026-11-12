@@ -21,7 +21,7 @@ Python 3.12, `uv`, `pytest` (marker `e2e`), `httpx`, `confluent-kafka`.
 | `test_11` | copilot auth | `POST /api/v1/chat` without a token returns `401` problem+json |
 | `test_12` | copilot | with a user token, `POST /api/v1/chat` (`LLM_PROVIDER=fake`) emits `tool_call` ok for `get_patient_vitals` / `list_alerts` (called as that user) and ends with `done` (no error) |
 
-Tokens come from clinical-api's dev endpoint (`APP_ENV=dev`): `nurse.levi` and `dr.cohen` (CLINICIAN), `observer` (VIEWER). Tests 08-10 need at least three OPEN alerts for P-0003.
+Tokens come from clinical-api's dev endpoint (`APP_ENV=dev` and `CLINICAL_DEV_TOKENS_ENABLED=true`, which the compose fragment sets by default): `nurse.levi` and `dr.cohen` (CLINICIAN), `observer` (VIEWER). Tests 08-10 need at least three OPEN alerts for P-0003.
 
 Every wait is `poll_until(...)` with a timeout and a description, so a failure names the missing hop.
 

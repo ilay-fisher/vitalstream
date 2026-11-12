@@ -182,3 +182,10 @@ tests:
       - notExists:
           path: data.CLINICAL_API_TOKEN
 
+  - it: clinical-api never gets the dev token opt-in flag (the endpoint stays off in prod)
+    documentSelector:
+      path: metadata.name
+      value: clinical-api
+    asserts:
+      - notExists:
+          path: data.CLINICAL_DEV_TOKENS_ENABLED
