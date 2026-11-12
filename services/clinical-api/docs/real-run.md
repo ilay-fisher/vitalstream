@@ -1,5 +1,7 @@
 # Real run evidence (synthetic data)
 
+> **Note (2026-11-12): this evidence predates authentication (CONTRACTS 4.2).** It was captured on 2026-11-11 against the unsecured API, so the requests below carry no `Authorization` header and section 7 still sends `by` in the ack body. Today every `/api` call needs `Authorization: Bearer <JWT>`, the ack body is `{"note"?}`, and `acknowledgedBy` is the token's `name` (else `sub`); a `by` field is ignored. Current authenticated evidence (401, 403, 200 with `acknowledgedBy` from the token) is in the PR that introduced authentication and in `e2e/tests/e2e/test_pipeline.py`.
+
 clinical-api 4.1.2 jar on :23082 against ad-hoc containers on 127.0.0.1 ports 23xxx (Postgres 23432, Kafka 23092, Redis 23379, RabbitMQ 23672, Elasticsearch 23200, Cassandra 23042, LocalStack 23566). Produced to `alerts.detected`: one CRITICAL alert (correlationId corr-real-1), the same alert again (duplicate), and one poison record.
 
 ## 1. Postgres: one alert row (duplicate was a no-op), outbox rows all published
@@ -75,7 +77,7 @@ data:{"alertId":"7c1d2b34-5e6f-4a8b-9c0d-1e2f3a4b5c6d","patientId":"P-0001","typ
 ```
 ## 7. Ack: 200, then second ack 409 (stale-version 409 via the optimistic lock is covered by AlertsApiIT)
 ```
-$ curl -i -X POST /api/v1/alerts/7c1d2b34-5e6f-4a8b-9c0d-1e2f3a4b5c6d/ack -d {"by":"dr.cohen","note":"at bedside"}
+$ curl -i -X POST /api/v1/alerts/7c1d2b34-5e6f-4a8b-9c0d-1e2f3a4b5c6d/ack -d {"by":"dr.cohen","note":"at bedside"}   # pre-auth request; now: -H "Authorization: Bearer <CLINICIAN token>" -d '{"note":"at bedside"}'
 HTTP/1.1 200 
 {"alertId":"7c1d2b34-5e6f-4a8b-9c0d-1e2f3a4b5c6d","patientId":"P-0001","type":"THRESHOLD","severity":"CRITICAL","metric":"SPO2","value":88.0,"score":null,"message":"SpO2 critically low (88 percent), oxygen saturation below 90","windowStart":"2026-11-11T20:15:00Z","windowEnd":"2026-11-11T20:16:00Z","detectedAt":"2026-11-11T20:16:02.010Z","status":"ACKNOWLEDGED","acknowledgedBy":"dr.cohen","acknowledgedAt":"2026-11-11T23:05:34.354685Z","acknowledgementNote":"at bedside","version":1}
 $ second ack
