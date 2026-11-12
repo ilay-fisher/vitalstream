@@ -89,6 +89,28 @@ export function createAuthStore(options: AuthStoreOptions = {}) {
   const now = options.now ?? Date.now;
   const listeners = new Set<() => void>();
 
+  /** Who clinical-api says this token belongs to (never trust what the client asked for). */
+  const fetchIdentity = async (token: string): Promise<Pick<Session, 'sub' | 'name' | 'roles'>> => {
+    let response: Response;
+    try {
+      response = await (options.fetchImpl ?? fetch)(`${clinical}/api/v1/me`, {
+        headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      throw new SignInError('Could not reach the server. Is the stack running?');
+    }
+    if (!response.ok) throw new SignInError(`Sign-in failed (HTTP ${response.status}).`);
+    const me = ((await response.json().catch(() => null)) ?? {}) as Record<string, unknown>;
+    if (typeof me.sub !== 'string' || !Array.isArray(me.roles)) {
+      throw new SignInError('The server answered with an unexpected sign-in response.');
+    }
+    return {
+      sub: me.sub,
+      name: typeof me.name === 'string' ? me.name : me.sub,
+      roles: me.roles.filter((r): r is RoleName => typeof r === 'string') as RoleName[],
+    };
+  };
+
   const persist = (session: Session | null) => {
     try {
       if (session) storage?.setItem(SESSION_KEY, JSON.stringify(session));
@@ -153,7 +175,7 @@ export function createAuthStore(options: AuthStoreOptions = {}) {
       set({ session: null, notice: EXPIRED_NOTICE });
     },
 
-    /** Asks the dev endpoint for a token for a demo user. */
+    /** Asks the dev endpoint for a token for a demo user; the identity shown is what `/me` says. */
     async signIn(user: DemoUser): Promise<Session> {
       let response: Response;
       try {
@@ -177,13 +199,8 @@ export function createAuthStore(options: AuthStoreOptions = {}) {
       if (typeof record.token !== 'string' || Number.isNaN(expiresAt)) {
         throw new SignInError('The server answered with an unexpected sign-in response.');
       }
-      const session: Session = {
-        token: record.token,
-        sub: user.sub,
-        name: user.name,
-        roles: user.roles,
-        expiresAt,
-      };
+      const identity = await fetchIdentity(record.token);
+      const session: Session = { token: record.token, ...identity, expiresAt };
       store.adopt(session);
       return session;
     },

@@ -27,6 +27,7 @@ describe('DEMO_USERS', () => {
 describe('signIn', () => {
   it('requests a token for the chosen demo user from the dev endpoint', async () => {
     let body: unknown;
+    let meAuth: string | null = null;
     server.use(
       http.post('*/clinical-api/api/v1/dev/token', async ({ request }) => {
         body = await request.json();
@@ -35,6 +36,10 @@ describe('signIn', () => {
           expiresAt: new Date(Date.now() + 8 * HOUR).toISOString(),
         });
       }),
+      http.get('*/clinical-api/api/v1/me', ({ request }) => {
+        meAuth = request.headers.get('authorization');
+        return HttpResponse.json({ sub: 'nurse.levi', name: 'Nurse Levi', roles: ['CLINICIAN'] });
+      }),
     );
     const store = newStore();
 
@@ -42,6 +47,7 @@ describe('signIn', () => {
 
     expect(body).toEqual({ sub: 'nurse.levi', name: 'Nurse Levi', roles: ['CLINICIAN'] });
     expect(session).toMatchObject({ token: 'tok-1', sub: 'nurse.levi', name: 'Nurse Levi' });
+    expect(meAuth).toBe('Bearer tok-1');
     expect(store.getToken()).toBe('tok-1');
     expect(store.getSnapshot().session?.name).toBe('Nurse Levi');
   });
@@ -71,6 +77,46 @@ describe('signIn', () => {
     );
 
     await expect(newStore().signIn(DEMO_USERS[0])).rejects.toThrow(/not available/i);
+  });
+
+  it('shows the identity /me reports, not the one that was asked for', async () => {
+    server.use(
+      http.get('*/clinical-api/api/v1/me', () =>
+        HttpResponse.json({ sub: 'observer', name: 'Observer', roles: ['VIEWER', 'ADMIN'] }),
+      ),
+    );
+
+    const session = await newStore().signIn(DEMO_USERS[0]);
+
+    expect(session).toMatchObject({
+      sub: 'observer',
+      name: 'Observer',
+      roles: ['VIEWER', 'ADMIN'],
+    });
+  });
+
+  it('falls back to the sub when /me has no name', async () => {
+    server.use(
+      http.get('*/clinical-api/api/v1/me', () =>
+        HttpResponse.json({ sub: 'copilot-mcp', roles: ['SERVICE'] }),
+      ),
+    );
+
+    expect((await newStore().signIn(DEMO_USERS[0])).name).toBe('copilot-mcp');
+  });
+
+  it.each([
+    ['rejects the token', () => HttpResponse.json({ status: 401 }, { status: 401 })],
+    ['answers nonsense', () => HttpResponse.json({ nope: 1 })],
+    ['is unreachable', () => HttpResponse.error()],
+  ])('fails sign-in and stores nothing when /me %s', async (_name, resolver) => {
+    server.use(http.get('*/clinical-api/api/v1/me', resolver));
+    const store = newStore();
+
+    await expect(store.signIn(DEMO_USERS[0])).rejects.toBeInstanceOf(SignInError);
+
+    expect(store.getToken()).toBeNull();
+    expect(window.sessionStorage.getItem(SESSION_KEY)).toBeNull();
   });
 
   it('reports an unreachable server', async () => {

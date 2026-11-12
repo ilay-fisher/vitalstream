@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { newCorrelationId, type Api } from '../lib/api';
 import { chatReducer, initialChatState, parseCopilotEvent } from '../lib/chatReducer';
-import { streamSse } from '../lib/sse';
+import { SseHttpError, streamSse } from '../lib/sse';
 
 /**
  * Copilot conversation over SSE. The session id comes from the server's `session` event and is
@@ -28,7 +28,8 @@ export function useChat(api: Api, patientId?: string) {
           {
             url: api.chatUrl,
             method: 'POST',
-            headers: { 'X-Correlation-Id': newCorrelationId() },
+            // The user's own token: the copilot checks it and acts on their behalf.
+            headers: { ...api.authHeaders(), 'X-Correlation-Id': newCorrelationId() },
             body: {
               message,
               ...(sessionRef.current ? { sessionId: sessionRef.current } : {}),
@@ -43,6 +44,10 @@ export function useChat(api: Api, patientId?: string) {
         );
       } catch (error) {
         if (controller.signal.aborted) return;
+        if (error instanceof SseHttpError && error.status === 401) {
+          api.handleUnauthorized();
+          return;
+        }
         dispatch({
           type: 'failed',
           message: error instanceof Error ? error.message : 'Connection to the copilot was lost.',

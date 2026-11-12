@@ -148,6 +148,16 @@ export const handlers = [
     });
   }),
 
+  http.get('*/clinical-api/api/v1/me', ({ request }) => {
+    const claims = authorize(request);
+    if (claims instanceof Response) return claims;
+    return HttpResponse.json({
+      sub: claims.sub,
+      name: claims.name ?? claims.sub,
+      roles: claims.roles,
+    });
+  }),
+
   http.get('*/clinical-api/api/v1/patients', async ({ request }) => {
     const denied = authorize(request);
     if (denied instanceof Response) return denied;
@@ -294,6 +304,8 @@ export const handlers = [
   }),
 
   http.post('*/copilot-api/api/v1/chat', async ({ request }) => {
+    const denied = authorize(request);
+    if (denied instanceof Response) return denied;
     const body = (await request.json()) as { message: string; sessionId?: string };
     const sessionId = body.sessionId ?? 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
     return sseResponse((push, close) => {
