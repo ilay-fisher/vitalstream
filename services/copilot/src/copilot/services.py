@@ -3,6 +3,7 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
+import httpx
 import structlog
 from elasticsearch import AsyncElasticsearch
 from sqlalchemy import text
@@ -10,6 +11,7 @@ from sqlalchemy import text
 from copilot.agent.graph import CopilotAgent
 from copilot.agent.memory import ConversationMemory
 from copilot.clinical import ClinicalApiClient
+from copilot.clinical_auth import build_token_provider
 from copilot.config import Settings
 from copilot.db import create_engine, run_migrations, session_factory
 from copilot.llm.factory import build_llm
@@ -48,7 +50,15 @@ async def build_services(settings: Settings) -> Services:
     await run_migrations(settings.sqlalchemy_url)
     engine = create_engine(settings.sqlalchemy_url)
     es_client = AsyncElasticsearch(settings.elasticsearch_url)
-    clinical = ClinicalApiClient(settings.clinical_api_url, settings.http_timeout_seconds)
+    clinical_http = httpx.AsyncClient(
+        base_url=settings.clinical_api_url.rstrip("/"), timeout=settings.http_timeout_seconds
+    )
+    clinical = ClinicalApiClient(
+        settings.clinical_api_url,
+        build_token_provider(settings, clinical_http),
+        settings.http_timeout_seconds,
+        http_client=clinical_http,
+    )
 
     store = PgStore(session_factory(engine))
     keyword = EsKeywordIndex(es_client, settings.es_index)

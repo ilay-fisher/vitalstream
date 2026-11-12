@@ -128,9 +128,10 @@ Security (CONTRACTS §4.1): every `/mcp` request needs `Authorization: Bearer $M
 | `POSTGRES_URL` | `postgresql://vitalstream:vitalstream@localhost:5433/vitalstream` | schema `copilot`, migrated with Alembic at startup |
 | `ELASTICSEARCH_URL` | `http://localhost:9200` | BM25 index `guidelines` (`ES_INDEX`) |
 | `CLINICAL_API_URL` | `http://localhost:8082` | vitals and alerts |
+| `CLINICAL_API_TOKEN` | unset | bearer JWT (role `SERVICE`) for clinical-api. Unset in `dev`: the copilot requests one for `sub` `copilot` from clinical-api's dev token endpoint, caches it and renews it 60 s before expiry. Outside `dev` it is required (startup fails if empty or < 32 chars) |
 | `COPILOT_ADMIN_TOKEN` / `MCP_TOKEN` | `dev-admin-token` / `dev-mcp-token` | bearer tokens (constant-time compare); override outside local dev |
 | `ALLOWED_HOSTS` | `localhost,127.0.0.1,copilot` | Host-header allowlist on every route (400 otherwise) |
-| `APP_ENV` | `dev` | anything else makes startup fail if the admin/MCP tokens, pseudonym key or DB password are empty, dev defaults or < 32 chars; `dev` logs one WARN "running with dev secrets" |
+| `APP_ENV` | `dev` | anything else makes startup fail if the admin/MCP tokens, pseudonym key, `CLINICAL_API_TOKEN` or DB password are empty, dev defaults or < 32 chars; `dev` logs one WARN "running with dev secrets" |
 | `LOG_PSEUDONYM_KEY` | `dev-only-pseudonym-key` | HMAC key for `patientRef` in logs (raw patient ids are never logged) |
 | `LLM_PROVIDER` | `fake` | `fake` or `anthropic` |
 | `ANTHROPIC_API_KEY` | empty | required for `anthropic` |
@@ -156,5 +157,6 @@ Security (CONTRACTS §4.1): every `/mcp` request needs `Authorization: Bearer $M
 
 * Tools are implemented once (`copilot.tools`) and consumed by both the agent and the MCP server, so behaviour and metrics cannot drift.
 * Business logic depends on small ports (`Embedder`, `VectorIndex`, `KeywordIndex`, `DocumentStore`, `LLMProvider`), which keeps unit tests free of Docker and model downloads.
+* clinical-api is secured (CONTRACTS 4.2): every call carries `Authorization: Bearer <service token>` (`src/copilot/clinical_auth.py`). A 401 invalidates the cached token and retries once; a static `CLINICAL_API_TOKEN` cannot be renewed, so rotating it means restarting. The MCP tools and the agent use the same client, so they work unchanged against the secured API. The copilot reads with a `SERVICE` identity and cannot acknowledge alerts.
 * clinical-api response shapes are not specified in CONTRACTS; the client accepts either a bare array or a page object (`content`/`items`/...) and reads AlertView / vital fields by the names in §3.
 * Observability: JSON logs with `service` and `correlationId`, `/metrics` with chat requests, tool calls by name, retrieval latency, LLM latency and tokens.

@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     elasticsearch_url: str = "http://localhost:9200"
     es_index: str = "guidelines"
     clinical_api_url: str = "http://localhost:8082"
+    clinical_api_token: SecretStr | None = None
     http_timeout_seconds: float = 10.0
 
     copilot_admin_token: SecretStr = SecretStr("dev-admin-token")
@@ -83,6 +84,7 @@ class Settings(BaseSettings):
                 "dev-only-pseudonym-key",
             ),
             "database password (POSTGRES_URL)": (db_password, "vitalstream"),
+            "CLINICAL_API_TOKEN": (self._clinical_token(), ""),
         }
         weak = [
             name
@@ -94,6 +96,9 @@ class Settings(BaseSettings):
                 f"APP_ENV={self.app_env}: refusing to start with weak secrets "
                 f"(empty, dev default or < {_MIN_SECRET_LENGTH} chars): {', '.join(weak)}"
             )
+
+    def _clinical_token(self) -> str:
+        return self.clinical_api_token.get_secret_value() if self.clinical_api_token else ""
 
     @property
     def allowed_host_list(self) -> list[str]:

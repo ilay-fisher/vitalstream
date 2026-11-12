@@ -96,7 +96,7 @@ async def test_dev_provider_caches_until_sixty_seconds_before_expiry() -> None:
 
 
 def test_refresh_margin_is_sixty_seconds() -> None:
-    assert REFRESH_MARGIN == timedelta(seconds=60)
+    assert timedelta(seconds=60) == REFRESH_MARGIN
 
 
 async def test_dev_provider_fetches_once_for_concurrent_callers() -> None:
@@ -156,9 +156,7 @@ async def test_client_sends_bearer_on_vitals_and_alerts() -> None:
         vitals = router.get(f"{BASE}/api/v1/patients/P-0001/vitals").mock(
             return_value=httpx.Response(200, json=[])
         )
-        alerts = router.get(f"{BASE}/api/v1/alerts").mock(
-            return_value=httpx.Response(200, json=[])
-        )
+        alerts = router.get(f"{BASE}/api/v1/alerts").mock(return_value=httpx.Response(200, json=[]))
         await client.vitals("P-0001", 30)
         await client.alerts("P-0001", None)
     await client.aclose()
@@ -213,7 +211,8 @@ async def test_client_reports_a_403_as_unavailable() -> None:
 async def test_explicit_token_wins_over_the_dev_endpoint() -> None:
     async with httpx.AsyncClient() as http:
         provider = build_token_provider(
-            Settings(clinical_api_token=SecretStr("explicit")), http  # type: ignore[arg-type]
+            Settings(clinical_api_token=SecretStr("explicit")),
+            http,  # type: ignore[arg-type]
         )
     assert isinstance(provider, StaticTokenProvider)
     assert await provider.token() == "explicit"
